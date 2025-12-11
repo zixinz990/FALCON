@@ -147,6 +147,18 @@ class JointControlGUI:
         self.root.mainloop()
 
 
+init_upper_joint_ref_pos = np.zeros((1, 14))
+target_upper_joint_ref_pos = np.array(
+    [[0.0, 1.5, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, -1.5, 0.0, 1.5, 0.0, 0.0, 0.0]]
+)
+init_target_diff = target_upper_joint_ref_pos - init_upper_joint_ref_pos
+num_steps = 100
+step_length = init_target_diff / num_steps
+joint_ref_traj = []
+for i in range(num_steps):
+    joint_ref_traj.append(init_upper_joint_ref_pos + step_length * (i + 1))
+
+
 class LocoManipPolicy(DecLocomotionPolicy):
     def __init__(self, config, model_path, rl_rate=50, policy_action_scale=0.25):
         super().__init__(config, model_path, rl_rate, policy_action_scale)
@@ -162,6 +174,10 @@ class LocoManipPolicy(DecLocomotionPolicy):
         self.upper_body_controller = None
         if self.config.get("use_upper_body_controller", False):
             self.init_upper_body_controller()
+
+        # For playing loaded trajectory
+        self.play_loaded_upper_traj = False
+        self.play_loaded_upper_traj_counter = 0
 
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_dict = super().get_current_obs_buffer_dict(robot_state_data)
@@ -238,6 +254,21 @@ class LocoManipPolicy(DecLocomotionPolicy):
         cmd_tau = np.zeros(self.num_dofs)
         # Get states
         robot_state_data = self.state_processor.robot_state_data
+
+        # If playing loaded upper body traj
+        self.logger.info(f"Current ref upper dof pos: {self.ref_upper_dof_pos}")
+        if self.play_loaded_upper_traj:
+            if self.play_loaded_upper_traj_counter < len(joint_ref_traj):
+                self.ref_upper_dof_pos = joint_ref_traj[
+                    self.play_loaded_upper_traj_counter
+                ]
+                self.play_loaded_upper_traj_counter += 1
+            else:
+                self.play_loaded_upper_traj = False
+                self.play_loaded_upper_traj_counter = 0
+                self.logger.info(
+                    colored("Finished playing loaded upper body joint trajectories!")
+                )
 
         # Apply upper body controller (IK)
         # NOTE: If you are using the GUI sliders, this block might overwrite your slider values!
@@ -318,6 +349,12 @@ class LocoManipPolicy(DecLocomotionPolicy):
             )
         elif keycode in ["1", "2"]:
             self._handle_base_height_control(keycode)
+        elif keycode == "n":
+            self.play_loaded_upper_traj = True
+            self.play_loaded_upper_traj_counter = 0
+            self.logger.info(
+                colored("Start playing loaded upper body joint trajectories!")
+            )
 
     def handle_joystick_button(self, cur_key):
         super().handle_joystick_button(cur_key)
