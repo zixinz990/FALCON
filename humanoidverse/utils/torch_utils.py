@@ -12,7 +12,8 @@ import torch
 import numpy as np
 from typing import Tuple
 
-def to_torch(x, dtype=torch.float, device='cuda:0', requires_grad=False):
+
+def to_torch(x, dtype=torch.float, device="cuda:0", requires_grad=False):
     return torch.tensor(x, dtype=dtype, device=device, requires_grad=requires_grad)
 
 
@@ -60,11 +61,13 @@ def quat_rotate(q, v):
     shape = q.shape
     q_w = q[:, -1]
     q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * \
-        torch.bmm(q_vec.view(shape[0], 1, 3), v.view(
-            shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a + b + c
 
 
@@ -73,10 +76,13 @@ def quat_rotate_inverse(q, v):
     shape = q.shape
     q_w = q[:, -1]
     q_vec = q[:, :3]
-    a = v * (2.0 * q_w ** 2 - 1.0).unsqueeze(-1)
+    a = v * (2.0 * q_w**2 - 1.0).unsqueeze(-1)
     b = torch.cross(q_vec, v, dim=-1) * q_w.unsqueeze(-1) * 2.0
-    c = q_vec * \
-        torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1) * 2.0
+    c = (
+        q_vec
+        * torch.bmm(q_vec.view(shape[0], 1, 3), v.view(shape[0], 3, 1)).squeeze(-1)
+        * 2.0
+    )
     return a - b + c
 
 
@@ -131,13 +137,12 @@ def get_basis_vector(q, v):
     return quat_rotate(q, v)
 
 
-def get_axis_params(value, axis_idx, x_value=0., dtype=np.float64, n_dims=3):
-    """construct arguments to `Vec` according to axis index.
-    """
+def get_axis_params(value, axis_idx, x_value=0.0, dtype=np.float64, n_dims=3):
+    """construct arguments to `Vec` according to axis index."""
     zs = np.zeros((n_dims,))
     assert axis_idx < n_dims, "the axis dim should be within the vector dimensions"
-    zs[axis_idx] = 1.
-    params = np.where(zs == 1., value, zs)
+    zs[axis_idx] = 1.0
+    params = np.where(zs == 1.0, value, zs)
     params[0] = x_value
     return list(params.astype(dtype))
 
@@ -154,22 +159,31 @@ def get_euler_xyz(q):
     qx, qy, qz, qw = 0, 1, 2, 3
     # roll (x-axis rotation)
     sinr_cosp = 2.0 * (q[:, qw] * q[:, qx] + q[:, qy] * q[:, qz])
-    cosr_cosp = q[:, qw] * q[:, qw] - q[:, qx] * \
-        q[:, qx] - q[:, qy] * q[:, qy] + q[:, qz] * q[:, qz]
+    cosr_cosp = (
+        q[:, qw] * q[:, qw]
+        - q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy]
+        + q[:, qz] * q[:, qz]
+    )
     roll = torch.atan2(sinr_cosp, cosr_cosp)
 
     # pitch (y-axis rotation)
     sinp = 2.0 * (q[:, qw] * q[:, qy] - q[:, qz] * q[:, qx])
-    pitch = torch.where(torch.abs(sinp) >= 1, copysign(
-        np.pi / 2.0, sinp), torch.asin(sinp))
+    pitch = torch.where(
+        torch.abs(sinp) >= 1, copysign(np.pi / 2.0, sinp), torch.asin(sinp)
+    )
 
     # yaw (z-axis rotation)
     siny_cosp = 2.0 * (q[:, qw] * q[:, qz] + q[:, qx] * q[:, qy])
-    cosy_cosp = q[:, qw] * q[:, qw] + q[:, qx] * \
-        q[:, qx] - q[:, qy] * q[:, qy] - q[:, qz] * q[:, qz]
+    cosy_cosp = (
+        q[:, qw] * q[:, qw]
+        + q[:, qx] * q[:, qx]
+        - q[:, qy] * q[:, qy]
+        - q[:, qz] * q[:, qz]
+    )
     yaw = torch.atan2(siny_cosp, cosy_cosp)
 
-    return roll % (2*np.pi), pitch % (2*np.pi), yaw % (2*np.pi)
+    return roll % (2 * np.pi), pitch % (2 * np.pi), yaw % (2 * np.pi)
 
 
 @torch.jit.script
@@ -209,7 +223,7 @@ def tensor_clamp(t, min_t, max_t):
 
 @torch.jit.script
 def scale(x, lower, upper):
-    return (0.5 * (x + 1.0) * (upper - lower) + lower)
+    return 0.5 * (x + 1.0) * (upper - lower) + lower
 
 
 @torch.jit.script
@@ -220,8 +234,11 @@ def unscale(x, lower, upper):
 def unscale_np(x, lower, upper):
     return (2.0 * x - upper - lower) / (upper - lower)
 
+
 @torch.jit.script
-def generate_sphere_sample_params(N: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+def generate_sphere_sample_params(
+    N: int, device: torch.device
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Generate reusable random directions and radius scales for sampling points inside a unit sphere.
 
@@ -241,12 +258,13 @@ def generate_sphere_sample_params(N: int, device: torch.device) -> Tuple[torch.T
     radius_scales = torch.pow(torch.rand(N, 1, device=device), 1.0 / 3.0)
     return unit_dirs, radius_scales
 
+
 @torch.jit.script
 def apply_sphere_sample_to_segments(
     start: torch.Tensor,
     end: torch.Tensor,
     unit_dirs: torch.Tensor,
-    radius_scales: torch.Tensor
+    radius_scales: torch.Tensor,
 ) -> torch.Tensor:
     """
     Use pre-generated directions and scale factors to compute points inside spheres defined by [start, end].
@@ -264,7 +282,8 @@ def apply_sphere_sample_to_segments(
     radius = 0.5 * torch.norm(end - start, dim=-1, keepdim=True)
     return center + unit_dirs * radius * radius_scales
 
-def sample_3d_directions(num_samples: int, device: str = 'cuda:0') -> torch.Tensor:
+
+def sample_3d_directions(num_samples: int, device: str = "cuda:0") -> torch.Tensor:
     """
     Sample random 3D directions uniformly on the unit sphere.
     Args:

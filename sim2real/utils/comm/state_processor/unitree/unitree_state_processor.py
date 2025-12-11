@@ -3,23 +3,24 @@ from ..base import BasicStateProcessor
 
 class UnitreeStateProcessor(BasicStateProcessor):
     """Unitree state processor implementation."""
-    
+
     def _init_sdk_components(self):
         """Initialize Unitree SDK-specific components."""
         from unitree_sdk2py.core.channel import ChannelSubscriber
         from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowState_ as LowState_go
         from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_ as LowState_hg
-        
+
         robot_type = self.config["ROBOT_TYPE"]
-        
-        if (
-            "g1" in robot_type
-            or "h1-2" in robot_type
-        ):
-            self.robot_lowstate_subscriber = ChannelSubscriber("rt/lowstate", LowState_hg)
+
+        if "g1" in robot_type or "h1-2" in robot_type:
+            self.robot_lowstate_subscriber = ChannelSubscriber(
+                "rt/lowstate", LowState_hg
+            )
             self.robot_lowstate_subscriber.Init(self.LowStateHandler_hg, 1)
         elif "h1" in robot_type or "go2" in robot_type:
-            self.robot_lowstate_subscriber = ChannelSubscriber("rt/lowstate", LowState_go)
+            self.robot_lowstate_subscriber = ChannelSubscriber(
+                "rt/lowstate", LowState_go
+            )
             self.robot_lowstate_subscriber.Init(self.LowStateHandler_go, 1)
         else:
             raise NotImplementedError(f"Robot type {robot_type} is not supported")
@@ -29,13 +30,13 @@ class UnitreeStateProcessor(BasicStateProcessor):
         if not msg:
             print("robot_low_state is None")
             return None
-            
+
         imu_state = msg.imu_state
         self._extract_imu_data(imu_state)
-        
+
         robot_joint_state = msg.motor_state
         self._extract_joint_data(robot_joint_state)
-        
+
         self.robot_state_data = self._create_robot_state_data()
         return self.robot_state_data
 
@@ -61,4 +62,4 @@ class UnitreeStateProcessor(BasicStateProcessor):
 
     def LowStateHandler_hg(self, msg):
         """Handle Unitree HG low-level state messages."""
-        self.robot_state_data = self.prepare_low_state(msg) 
+        self.robot_state_data = self.prepare_low_state(msg)

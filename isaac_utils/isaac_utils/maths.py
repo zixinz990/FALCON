@@ -3,14 +3,17 @@ import numpy as np
 import random
 import os
 
+
 @torch.jit.script
 def normalize(x, eps: float = 1e-9):
     return x / x.norm(p=2, dim=-1).clamp(min=eps, max=None).unsqueeze(-1)
+
 
 @torch.jit.script
 def torch_rand_float(lower, upper, shape, device):
     # type: (float, float, Tuple[int, int], str) -> Tensor
     return (upper - lower) * torch.rand(*shape, device=device) + lower
+
 
 @torch.jit.script
 def copysign(a, b):
@@ -19,9 +22,8 @@ def copysign(a, b):
     return torch.abs(a) * torch.sign(b)
 
 
-
 def set_seed(seed, torch_deterministic=False):
-    """ set seed across modules """
+    """set seed across modules"""
     if seed == -1 and torch_deterministic:
         seed = 42
     elif seed == -1:
@@ -46,4 +48,3 @@ def set_seed(seed, torch_deterministic=False):
         torch.backends.cudnn.deterministic = False
 
     return seed
-

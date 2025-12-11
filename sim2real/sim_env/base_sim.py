@@ -49,7 +49,9 @@ class BaseSimulator:
                     self.config["INTERFACE"] = "lo0"
                 else:
                     raise NotImplementedError("Only support Linux and MacOS.")
-                ChannelFactoryInitialize(self.config["DOMAIN_ID"], self.config["INTERFACE"])
+                ChannelFactoryInitialize(
+                    self.config["DOMAIN_ID"], self.config["INTERFACE"]
+                )
             else:
                 ChannelFactoryInitialize(self.config["DOMAIN_ID"])
         elif self.sdk_type == "booster":
@@ -72,24 +74,33 @@ class BaseSimulator:
         # Enable the elastic band
         if self.config["ENABLE_ELASTIC_BAND"]:
             self.elastic_band = ElasticBand()
-            band_attached_link_name = self.config.get("BAND_ATTACHED_LINK", "torso_link")
+            band_attached_link_name = self.config.get(
+                "BAND_ATTACHED_LINK", "torso_link"
+            )
             self.band_attached_link = self.mj_model.body(band_attached_link_name).id
             self.viewer = mujoco.viewer.launch_passive(
-                self.mj_model, self.mj_data, key_callback=self.elastic_band.MujuocoKeyCallback
+                self.mj_model,
+                self.mj_data,
+                key_callback=self.elastic_band.MujuocoKeyCallback,
             )
         else:
             self.viewer = mujoco.viewer.launch_passive(self.mj_model, self.mj_data)
 
     def init_robot_bridge(self):
-        self.robot_bridge = create_sdk2py_bridge(self.mj_model, self.mj_data, self.config)
+        self.robot_bridge = create_sdk2py_bridge(
+            self.mj_model, self.mj_data, self.config
+        )
         if self.config["USE_JOYSTICK"]:
             if sys.platform == "linux":  # TODO [Yuanhang]: add other joystick support
                 if self.config["SDK_TYPE"] == "unitree":
                     self.robot_bridge.SetupJoystick(
-                        device_id=self.config["JOYSTICK_DEVICE"], js_type=self.config["JOYSTICK_TYPE"]
+                        device_id=self.config["JOYSTICK_DEVICE"],
+                        js_type=self.config["JOYSTICK_TYPE"],
                     )
                 else:
-                    self.logger.warning(f"Joystick is not supported for {self.config['SDK_TYPE']} yet.")
+                    self.logger.warning(
+                        f"Joystick is not supported for {self.config['SDK_TYPE']} yet."
+                    )
             else:
                 self.logger.warning("Joystick is not supported on Windows or MacOS.")
 
@@ -104,9 +115,15 @@ class BaseSimulator:
                         + motor_cmd[i].kd * (motor_cmd[i].dq - self.mj_data.qvel[6 + i])
                     )
             except Exception as e:
-                self.logger.error(str.format("Joint {0} not found in motor_cmd: {1}", i, e))
+                self.logger.error(
+                    str.format("Joint {0} not found in motor_cmd: {1}", i, e)
+                )
         # Set the torque limit
-        self.torques = np.clip(self.torques, -self.robot_bridge.torque_limit, self.robot_bridge.torque_limit)
+        self.torques = np.clip(
+            self.torques,
+            -self.robot_bridge.torque_limit,
+            self.robot_bridge.torque_limit,
+        )
 
     def sim_step(self):
         self.robot_bridge.PublishLowState()
@@ -114,8 +131,10 @@ class BaseSimulator:
             self.robot_bridge.PublishWirelessController()
         if self.config["ENABLE_ELASTIC_BAND"]:
             if self.elastic_band.enable:
-                self.mj_data.xfrc_applied[self.band_attached_link, :3] = self.elastic_band.Advance(
-                    self.mj_data.qpos[:3], self.mj_data.qvel[:3]
+                self.mj_data.xfrc_applied[self.band_attached_link, :3] = (
+                    self.elastic_band.Advance(
+                        self.mj_data.qpos[:3], self.mj_data.qvel[:3]
+                    )
                 )
         self.compute_torques()
         if self.robot_bridge.free_base:
@@ -135,14 +154,18 @@ class BaseSimulator:
             sim_cnt += 1
             if sim_cnt % 100 == 0:
                 end_time = time.time()
-                self.logger.info(str.format("FPS: {0:.2f}", 100 / (end_time - start_time)))
+                self.logger.info(
+                    str.format("FPS: {0:.2f}", 100 / (end_time - start_time))
+                )
                 start_time = end_time
             self.rate.sleep()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
-    parser.add_argument("--config", type=str, default="config/g1/g1_29dof.yaml", help="config file")
+    parser.add_argument(
+        "--config", type=str, default="config/g1/g1_29dof.yaml", help="config file"
+    )
     args = parser.parse_args()
 
     with open(args.config) as file:

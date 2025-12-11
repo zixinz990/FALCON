@@ -1,10 +1,13 @@
 import numpy as np
 
+
 class WeightedMovingFilter:
     def __init__(self, weights, data_size=14):
         self._window_size = len(weights)
         self._weights = np.array(weights)
-        assert np.isclose(np.sum(self._weights), 1.0), "[WeightedMovingFilter] the sum of weights list must be 1.0!"
+        assert np.isclose(
+            np.sum(self._weights), 1.0
+        ), "[WeightedMovingFilter] the sum of weights list must be 1.0!"
         self._data_size = data_size
         self._filtered_data = np.zeros(self._data_size)
         self._data_queue = []
@@ -16,7 +19,9 @@ class WeightedMovingFilter:
         data_array = np.array(self._data_queue)
         temp_filtered_data = np.zeros(self._data_size)
         for i in range(self._data_size):
-            temp_filtered_data[i] = np.convolve(data_array[:, i], self._weights, mode="valid")[-1]
+            temp_filtered_data[i] = np.convolve(
+                data_array[:, i], self._weights, mode="valid"
+            )[-1]
 
         return temp_filtered_data
 

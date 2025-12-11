@@ -1,4 +1,3 @@
-
 import omni.isaac.lab.sim as sim_utils
 from omni.isaac.lab.actuators import ActuatorNetMLPCfg, DCMotorCfg, ImplicitActuatorCfg
 from omni.isaac.lab.assets.articulation import ArticulationCfg
@@ -19,7 +18,9 @@ ARTICULATION_CFG = ArticulationCfg(
             max_depenetration_velocity=1.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            enabled_self_collisions=False, solver_position_iteration_count=4, solver_velocity_iteration_count=4
+            enabled_self_collisions=False,
+            solver_position_iteration_count=4,
+            solver_velocity_iteration_count=4,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -38,10 +39,16 @@ ARTICULATION_CFG = ArticulationCfg(
         },
         joint_vel={".*": 0.0},
     ),
-    soft_joint_pos_limit_factor=0.9,        
+    soft_joint_pos_limit_factor=0.9,
     actuators={
         "legs": ImplicitActuatorCfg(
-            joint_names_expr=[".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_hip_pitch_joint", ".*_knee_joint", "torso_joint"],
+            joint_names_expr=[
+                ".*_hip_yaw_joint",
+                ".*_hip_roll_joint",
+                ".*_hip_pitch_joint",
+                ".*_knee_joint",
+                "torso_joint",
+            ],
             effort_limit=300,
             velocity_limit=100.0,
             stiffness={
@@ -67,7 +74,12 @@ ARTICULATION_CFG = ArticulationCfg(
             damping={".*_ankle_joint": 4.0},
         ),
         "arms": ImplicitActuatorCfg(
-            joint_names_expr=[".*_shoulder_pitch_joint", ".*_shoulder_roll_joint", ".*_shoulder_yaw_joint", ".*_elbow_joint"],
+            joint_names_expr=[
+                ".*_shoulder_pitch_joint",
+                ".*_shoulder_roll_joint",
+                ".*_shoulder_yaw_joint",
+                ".*_elbow_joint",
+            ],
             effort_limit=300,
             velocity_limit=100.0,
             stiffness={

@@ -13,7 +13,7 @@ from sim2real.utils.robot import Robot
 
 class BasicSdk2Bridge(ABC):
     """Abstract base class for SDK2Py bridge implementations."""
-    
+
     def __init__(self, mj_model, mj_data, robot_config):
         self.robot = Robot(robot_config)
         self.sdk_type = robot_config.get("SDK_TYPE", "unitree")
@@ -31,7 +31,9 @@ class BasicSdk2Bridge(ABC):
         self.torques = np.zeros(self.num_motor)
         self.torque_limit = np.array(self.robot.MOTOR_EFFORT_LIMIT_LIST)
 
-        self.use_sensor = self.robot.USE_SENSOR  # True: use sensor data; False: use ground truth data
+        self.use_sensor = (
+            self.robot.USE_SENSOR
+        )  # True: use sensor data; False: use ground truth data
         # Check if the robot is using sensor data
         self.have_imu_ = False
         self.have_frame_sensor_ = False
@@ -40,7 +42,9 @@ class BasicSdk2Bridge(ABC):
             self.dim_motor_sensor = MOTOR_SENSOR_NUM * self.num_motor
             # Check sensor
             for i in range(self.dim_motor_sensor, self.mj_model.nsensor):
-                name = mujoco.mj_id2name(self.mj_model, mujoco._enums.mjtObj.mjOBJ_SENSOR, i)
+                name = mujoco.mj_id2name(
+                    self.mj_model, mujoco._enums.mjtObj.mjOBJ_SENSOR, i
+                )
                 if name == "imu_quat":
                     self.have_imu_ = True
                 if name == "frame_pos":
@@ -90,12 +94,24 @@ class BasicSdk2Bridge(ABC):
         if self.joystick is not None:
             pygame.event.get()
             key_state = [0] * 16
-            key_state[self.key_map["R1"]] = self.joystick.get_button(self.button_id["RB"])
-            key_state[self.key_map["L1"]] = self.joystick.get_button(self.button_id["LB"])
-            key_state[self.key_map["start"]] = self.joystick.get_button(self.button_id["START"])
-            key_state[self.key_map["select"]] = self.joystick.get_button(self.button_id["SELECT"])
-            key_state[self.key_map["R2"]] = self.joystick.get_axis(self.axis_id["RT"]) > 0
-            key_state[self.key_map["L2"]] = self.joystick.get_axis(self.axis_id["LT"]) > 0
+            key_state[self.key_map["R1"]] = self.joystick.get_button(
+                self.button_id["RB"]
+            )
+            key_state[self.key_map["L1"]] = self.joystick.get_button(
+                self.button_id["LB"]
+            )
+            key_state[self.key_map["start"]] = self.joystick.get_button(
+                self.button_id["START"]
+            )
+            key_state[self.key_map["select"]] = self.joystick.get_button(
+                self.button_id["SELECT"]
+            )
+            key_state[self.key_map["R2"]] = (
+                self.joystick.get_axis(self.axis_id["RT"]) > 0
+            )
+            key_state[self.key_map["L2"]] = (
+                self.joystick.get_axis(self.axis_id["LT"]) > 0
+            )
             key_state[self.key_map["F1"]] = 0
             key_state[self.key_map["F2"]] = 0
             key_state[self.key_map["A"]] = self.joystick.get_button(self.button_id["A"])
@@ -111,12 +127,16 @@ class BasicSdk2Bridge(ABC):
             for i in range(16):
                 key_value += key_state[i] << i
 
-            if hasattr(self, 'wireless_controller'):
+            if hasattr(self, "wireless_controller"):
                 self.wireless_controller.keys = key_value
                 self.wireless_controller.lx = self.joystick.get_axis(self.axis_id["LX"])
-                self.wireless_controller.ly = -self.joystick.get_axis(self.axis_id["LY"])
+                self.wireless_controller.ly = -self.joystick.get_axis(
+                    self.axis_id["LY"]
+                )
                 self.wireless_controller.rx = self.joystick.get_axis(self.axis_id["RX"])
-                self.wireless_controller.ry = -self.joystick.get_axis(self.axis_id["RY"])
+                self.wireless_controller.ry = -self.joystick.get_axis(
+                    self.axis_id["RY"]
+                )
 
                 self.wireless_controller_puber.Write(self.wireless_controller)
 
@@ -231,7 +251,9 @@ class BasicSdk2Bridge(ABC):
 
         logger.info(colored("<<------------- Actuator ------------->>", "green"))
         for i in range(self.mj_model.nu):
-            name = mujoco.mj_id2name(self.mj_model, mujoco._enums.mjtObj.mjOBJ_ACTUATOR, i)
+            name = mujoco.mj_id2name(
+                self.mj_model, mujoco._enums.mjtObj.mjOBJ_ACTUATOR, i
+            )
             if name:
                 logger.info(f"actuator_index: {i}, name: {name}")
         print(" ")
@@ -239,9 +261,13 @@ class BasicSdk2Bridge(ABC):
         logger.info(colored("<<------------- Sensor ------------->>", "green"))
         index = 0
         for i in range(self.mj_model.nsensor):
-            name = mujoco.mj_id2name(self.mj_model, mujoco._enums.mjtObj.mjOBJ_SENSOR, i)
+            name = mujoco.mj_id2name(
+                self.mj_model, mujoco._enums.mjtObj.mjOBJ_SENSOR, i
+            )
             if name:
-                logger.info(f"sensor_index: {index}, name: {name}, dim: {self.mj_model.sensor_dim[i]}")
+                logger.info(
+                    f"sensor_index: {index}, name: {name}, dim: {self.mj_model.sensor_dim[i]}"
+                )
             index = index + self.mj_model.sensor_dim[i]
         print(" ")
 

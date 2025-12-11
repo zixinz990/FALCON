@@ -1,34 +1,41 @@
 from ..base import BasicSdk2Bridge
 from unitree_sdk2py.utils.crc import CRC
 
+
 class UnitreeSdk2Bridge(BasicSdk2Bridge):
     """Unitree SDK2Py bridge implementation."""
-    
+
     def _init_sdk_components(self):
         """Initialize Unitree SDK-specific components."""
         from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
         from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
         from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
-        
+
         robot_type = self.robot.ROBOT_TYPE
-        
+
         # Initialize based on robot type
         if "g1" in robot_type or "h1-2" in robot_type:
             from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowCmd_
-            from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowState_ as LowState_default
+            from unitree_sdk2py.idl.default import (
+                unitree_hg_msg_dds__LowState_ as LowState_default,
+            )
             from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowCmd_, LowState_
 
             self.low_cmd = unitree_hg_msg_dds__LowCmd_()
         elif robot_type == "h1" or robot_type == "go2":
             from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowCmd_
-            from unitree_sdk2py.idl.default import unitree_go_msg_dds__LowState_ as LowState_default
+            from unitree_sdk2py.idl.default import (
+                unitree_go_msg_dds__LowState_ as LowState_default,
+            )
             from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowCmd_, LowState_
 
             self.low_cmd = unitree_go_msg_dds__LowCmd_()
         else:
             # Raise an error if robot_type is not valid
-            raise ValueError(f"Invalid robot type '{robot_type}'. Expected 'g1', 'h1', or 'go2'.")
-        
+            raise ValueError(
+                f"Invalid robot type '{robot_type}'. Expected 'g1', 'h1', or 'go2'."
+            )
+
         # Unitree sdk2 message
         self.low_state = LowState_default()
         self.low_state_puber = ChannelPublisher("rt/lowstate", LowState_)
@@ -42,7 +49,9 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
 
         # Initialize wireless controller for Unitree
         self.wireless_controller = unitree_go_msg_dds__WirelessController_()
-        self.wireless_controller_puber = ChannelPublisher("rt/wirelesscontroller", WirelessController_)
+        self.wireless_controller_puber = ChannelPublisher(
+            "rt/wirelesscontroller", WirelessController_
+        )
         self.wireless_controller_puber.Init()
 
     def LowCmdHandler(self, msg):
@@ -76,17 +85,25 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
                 m.q = qpos[7 + i]
                 m.dq = qvel[6 + i]
                 m.ddq = qacc[6 + i]
-                m.tau_est = actuator_force[6 + i] if self.free_base else actuator_force[i]
+                m.tau_est = (
+                    actuator_force[6 + i] if self.free_base else actuator_force[i]
+                )
 
         if self.use_sensor and self.have_frame_sensor_:
-            imu.quaternion[:] = sensor[self.dim_motor_sensor + 0 : self.dim_motor_sensor + 4]
-            imu.gyroscope[:] = sensor[self.dim_motor_sensor + 4 : self.dim_motor_sensor + 7]
+            imu.quaternion[:] = sensor[
+                self.dim_motor_sensor + 0 : self.dim_motor_sensor + 4
+            ]
+            imu.gyroscope[:] = sensor[
+                self.dim_motor_sensor + 4 : self.dim_motor_sensor + 7
+            ]
         else:
             imu.quaternion[:] = qpos[3:7]
             imu.gyroscope[:] = qvel[3:6]
 
         if self.use_sensor and self.have_frame_sensor_:
-            imu.accelerometer[:] = sensor[self.dim_motor_sensor + 7 : self.dim_motor_sensor + 10]
+            imu.accelerometer[:] = sensor[
+                self.dim_motor_sensor + 7 : self.dim_motor_sensor + 10
+            ]
         else:
             imu.accelerometer[:] = qacc[0:3]
 

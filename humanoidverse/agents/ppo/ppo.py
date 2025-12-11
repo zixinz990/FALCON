@@ -19,16 +19,14 @@ from loguru import logger
 from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
+
 console = Console()
 
-class PPO(BaseAlgo):
-    def __init__(self,
-                 env: BaseTask,
-                 config,
-                 log_dir=None,
-                 device='cpu'):
 
-        self.device= device
+class PPO(BaseAlgo):
+    def __init__(self, env: BaseTask, config, log_dir=None, device="cpu"):
+
+        self.device = device
         self.env = env
         self.config = config
         self.log_dir = log_dir
@@ -44,15 +42,19 @@ class PPO(BaseAlgo):
         self.tot_timesteps = 0
         self.tot_time = 0
         self.current_learning_iteration = 0
-        
+
         self.transition = RolloutStorage.Transition()
 
         # Book keeping
         self.ep_infos = []
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
-        self.cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        self.cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        self.cur_reward_sum = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device
+        )
+        self.cur_episode_length = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device
+        )
 
         self.eval_callbacks: list[RL_EvalCallback] = []
         self.episode_env_tensors = TensorAverageMeterDict()
@@ -62,7 +64,7 @@ class PPO(BaseAlgo):
         # Env related Config
         self.num_envs: int = self.env.config.num_envs
         self.algo_obs_dim_dict = self.env.config.robot.algo_obs_dim_dict
-        self.algo_history_length_dict = self.env.config.obs.get('history_length', {})
+        self.algo_history_length_dict = self.env.config.obs.get("history_length", {})
         self.num_act = self.env.config.robot.actions_dim
 
         # Logging related Config
@@ -90,7 +92,6 @@ class PPO(BaseAlgo):
         self.max_grad_norm = self.config.max_grad_norm
         self.use_clipped_value_loss = self.config.use_clipped_value_loss
 
-
     def setup(self):
         logger.info("Setting up PPO")
         self._setup_models_and_optimizer()
@@ -102,33 +103,46 @@ class PPO(BaseAlgo):
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std
+            init_noise_std=self.config.init_noise_std,
         ).to(self.device)
 
-        self.critic = PPOCritic(self.algo_obs_dim_dict,
-                                self.config.module_dict.critic).to(self.device)
+        self.critic = PPOCritic(
+            self.algo_obs_dim_dict, self.config.module_dict.critic
+        ).to(self.device)
 
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=self.actor_learning_rate)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=self.critic_learning_rate)
+        self.actor_optimizer = optim.Adam(
+            self.actor.parameters(), lr=self.actor_learning_rate
+        )
+        self.critic_optimizer = optim.Adam(
+            self.critic.parameters(), lr=self.critic_learning_rate
+        )
 
     def _setup_storage(self):
-        self.storage = RolloutStorage(self.env.num_envs, self.num_steps_per_env, device=self.device)
+        self.storage = RolloutStorage(
+            self.env.num_envs, self.num_steps_per_env, device=self.device
+        )
         ## Register obs keys
         for obs_key, obs_dim in self.algo_obs_dim_dict.items():
             history_len = self.algo_history_length_dict.get(obs_key, 1)
             print(f"Registering key: {obs_key} with shape: {obs_dim * history_len}")
-            self.storage.register_key(obs_key, shape=(obs_dim * history_len,), dtype=torch.float)
-        
+            self.storage.register_key(
+                obs_key, shape=(obs_dim * history_len,), dtype=torch.float
+            )
+
         ## Register others
-        self.storage.register_key('actions', shape=(self.num_act,), dtype=torch.float)
-        self.storage.register_key('rewards', shape=(1,), dtype=torch.float)
-        self.storage.register_key('dones', shape=(1,), dtype=torch.bool)
-        self.storage.register_key('values', shape=(1,), dtype=torch.float)
-        self.storage.register_key('returns', shape=(1,), dtype=torch.float)
-        self.storage.register_key('advantages', shape=(1,), dtype=torch.float)
-        self.storage.register_key('actions_log_prob', shape=(1,), dtype=torch.float)
-        self.storage.register_key('action_mean', shape=(self.num_act,), dtype=torch.float)
-        self.storage.register_key('action_sigma', shape=(self.num_act,), dtype=torch.float)
+        self.storage.register_key("actions", shape=(self.num_act,), dtype=torch.float)
+        self.storage.register_key("rewards", shape=(1,), dtype=torch.float)
+        self.storage.register_key("dones", shape=(1,), dtype=torch.bool)
+        self.storage.register_key("values", shape=(1,), dtype=torch.float)
+        self.storage.register_key("returns", shape=(1,), dtype=torch.float)
+        self.storage.register_key("advantages", shape=(1,), dtype=torch.float)
+        self.storage.register_key("actions_log_prob", shape=(1,), dtype=torch.float)
+        self.storage.register_key(
+            "action_mean", shape=(self.num_act,), dtype=torch.float
+        )
+        self.storage.register_key(
+            "action_sigma", shape=(self.num_act,), dtype=torch.float
+        )
 
     def _eval_mode(self):
         self.actor.eval()
@@ -145,11 +159,21 @@ class PPO(BaseAlgo):
             self.actor.load_state_dict(loaded_dict["actor_model_state_dict"])
             self.critic.load_state_dict(loaded_dict["critic_model_state_dict"])
             if self.load_optimizer:
-                self.actor_optimizer.load_state_dict(loaded_dict["actor_optimizer_state_dict"])
-                self.critic_optimizer.load_state_dict(loaded_dict["critic_optimizer_state_dict"])
-                self.actor_learning_rate = loaded_dict['actor_optimizer_state_dict']['param_groups'][0]['lr']
-                self.critic_learning_rate = loaded_dict['critic_optimizer_state_dict']['param_groups'][0]['lr']
-                self.set_learning_rate(self.actor_learning_rate, self.critic_learning_rate)
+                self.actor_optimizer.load_state_dict(
+                    loaded_dict["actor_optimizer_state_dict"]
+                )
+                self.critic_optimizer.load_state_dict(
+                    loaded_dict["critic_optimizer_state_dict"]
+                )
+                self.actor_learning_rate = loaded_dict["actor_optimizer_state_dict"][
+                    "param_groups"
+                ][0]["lr"]
+                self.critic_learning_rate = loaded_dict["critic_optimizer_state_dict"][
+                    "param_groups"
+                ][0]["lr"]
+                self.set_learning_rate(
+                    self.actor_learning_rate, self.critic_learning_rate
+                )
                 logger.info(f"Optimizer loaded from checkpoint")
                 logger.info(f"Actor Learning rate: {self.actor_learning_rate}")
                 logger.info(f"Critic Learning rate: {self.critic_learning_rate}")
@@ -158,35 +182,40 @@ class PPO(BaseAlgo):
 
     def save(self, path, infos=None):
         logger.info(f"Saving checkpoint to {path}")
-        torch.save({
-            'actor_model_state_dict': self.actor.state_dict(),
-            'critic_model_state_dict': self.critic.state_dict(),
-            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
-            'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
-            'iter': self.current_learning_iteration,
-            'infos': infos,
-        }, path)
-        
+        torch.save(
+            {
+                "actor_model_state_dict": self.actor.state_dict(),
+                "critic_model_state_dict": self.critic.state_dict(),
+                "actor_optimizer_state_dict": self.actor_optimizer.state_dict(),
+                "critic_optimizer_state_dict": self.critic_optimizer.state_dict(),
+                "iter": self.current_learning_iteration,
+                "infos": infos,
+            },
+            path,
+        )
+
     def learn(self):
         if self.init_at_random_ep_len:
-            self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
-        
+            self.env.episode_length_buf = torch.randint_like(
+                self.env.episode_length_buf, high=int(self.env.max_episode_length)
+            )
+
         obs_dict = self.env.reset_all()
         for obs_key in obs_dict.keys():
             obs_dict[obs_key] = obs_dict[obs_key].to(self.device)
-            
+
         self._train_mode()
 
         num_learning_iterations = self.num_learning_iterations
 
         tot_iter = self.current_learning_iteration + num_learning_iterations
-        
+
         # do not use track, because it will confict with motion loading bar
         # for it in track(range(self.current_learning_iteration, tot_iter), description="Learning Iterations"):
         for it in range(self.current_learning_iteration, tot_iter):
             self.start_time = time.time()
 
-            obs_dict =self._rollout_step(obs_dict)
+            obs_dict = self._rollout_step(obs_dict)
 
             loss_dict = self._training_step()
 
@@ -195,33 +224,41 @@ class PPO(BaseAlgo):
 
             # Logging
             log_dict = {
-                'it': it,
-                'loss_dict': loss_dict,
-                'collection_time': self.collection_time,
-                'learn_time': self.learn_time,
-                'ep_infos': self.ep_infos,
-                'rewbuffer': self.rewbuffer,
-                'lenbuffer': self.lenbuffer,
-                'num_learning_iterations': num_learning_iterations
+                "it": it,
+                "loss_dict": loss_dict,
+                "collection_time": self.collection_time,
+                "learn_time": self.learn_time,
+                "ep_infos": self.ep_infos,
+                "rewbuffer": self.rewbuffer,
+                "lenbuffer": self.lenbuffer,
+                "num_learning_iterations": num_learning_iterations,
             }
             self._post_epoch_logging(log_dict)
             if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+                self.save(os.path.join(self.log_dir, "model_{}.pt".format(it)))
             self.ep_infos.clear()
-        
+
         self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        self.save(
+            os.path.join(
+                self.log_dir, "model_{}.pt".format(self.current_learning_iteration)
+            )
+        )
 
     def _actor_critic_rollout_step(self, obs_dict):
         self.transition.actions = self.actor.act(obs_dict["actor_obs"])
         self.transition.values = self.critic.evaluate(obs_dict["critic_obs"]).detach()
-        self.transition.actions_log_prob = self.actor.get_actions_log_prob(self.transition.actions).detach().unsqueeze(1)
+        self.transition.actions_log_prob = (
+            self.actor.get_actions_log_prob(self.transition.actions)
+            .detach()
+            .unsqueeze(1)
+        )
         self.transition.action_mean = self.actor.action_mean.detach()
         self.transition.action_sigma = self.actor.action_std.detach()
         # need to record obs and critic_obs before env.step()
         self.transition.actor_obs = obs_dict["actor_obs"]
         self.transition.critic_obs = obs_dict["critic_obs"]
-        
+
         assert len(self.transition.actions.shape) == 2
         assert len(self.transition.actions_log_prob.shape) == 2
         assert len(self.transition.action_mean.shape) == 2
@@ -250,29 +287,35 @@ class PPO(BaseAlgo):
 
                 if self.log_dir is not None:
                     # Book keeping
-                    if 'episode' in infos:
-                        self.ep_infos.append(infos['episode'])
+                    if "episode" in infos:
+                        self.ep_infos.append(infos["episode"])
                     self.cur_reward_sum += rewards
                     self.cur_episode_length += 1
                     new_ids = (dones > 0).nonzero(as_tuple=False)
-                    self.rewbuffer.extend(self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                    self.lenbuffer.extend(self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                    self.rewbuffer.extend(
+                        self.cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist()
+                    )
+                    self.lenbuffer.extend(
+                        self.cur_episode_length[new_ids][:, 0].cpu().numpy().tolist()
+                    )
                     self.cur_reward_sum[new_ids] = 0
                     self.cur_episode_length[new_ids] = 0
 
             self.stop_time = time.time()
             self.collection_time = self.stop_time - self.start_time
             self.start_time = self.stop_time
-            
+
             # prepare data for training
             returns, advantages = self._compute_returns(
                 last_obs_dict=obs_dict,
-                policy_state_dict=dict(values=self.storage.query_key('values'), 
-                                       dones=self.storage.query_key('dones'), 
-                                       rewards=self.storage.query_key('rewards'))
+                policy_state_dict=dict(
+                    values=self.storage.query_key("values"),
+                    dones=self.storage.query_key("dones"),
+                    rewards=self.storage.query_key("rewards"),
+                ),
             )
-            self.storage.batch_update_data('returns', returns)
-            self.storage.batch_update_data('advantages', advantages)
+            self.storage.batch_update_data("returns", returns)
+            self.storage.batch_update_data("advantages", advantages)
 
         return obs_dict
 
@@ -280,56 +323,64 @@ class PPO(BaseAlgo):
         self.transition.rewards = rewards
         self.transition.dones = dones
         # Bootstrapping on time outs
-        if 'time_outs' in infos:
-            self.transition.rewards += self.gamma * self.transition.values * infos['time_outs'].unsqueeze(1).to(self.device)
+        if "time_outs" in infos:
+            self.transition.rewards += (
+                self.gamma
+                * self.transition.values
+                * infos["time_outs"].unsqueeze(1).to(self.device)
+            )
         assert len(self.transition.rewards.shape) == 2
         # Record the transition
         self.storage.add_transitions(self.transition)
-        
+
         self.transition.clear()
         self.actor.reset(dones)
         self.critic.reset(dones)
 
     def _compute_returns(self, last_obs_dict, policy_state_dict):
         """Compute the returns and advantages for the given policy state.
-        This function calculates the returns and advantages for each step in the 
-        environment based on the provided observations and policy state. It uses 
-        Generalized Advantage Estimation (GAE) to compute the advantages, which 
+        This function calculates the returns and advantages for each step in the
+        environment based on the provided observations and policy state. It uses
+        Generalized Advantage Estimation (GAE) to compute the advantages, which
         helps in reducing the variance of the policy gradient estimates.
         Args:
-            last_obs_dict (dict): The last observation dictionary containing the 
+            last_obs_dict (dict): The last observation dictionary containing the
                       final state of the environment.
-            policy_state_dict (dict): A dictionary containing the policy state 
-                          information, including 'values', 'dones', 
+            policy_state_dict (dict): A dictionary containing the policy state
+                          information, including 'values', 'dones',
                           and 'rewards'.
         Returns:
             tuple: A tuple containing:
             - returns (torch.Tensor): The computed returns for each step.
             - advantages (torch.Tensor): The normalized advantages for each step.
         """
-        last_values= self.critic.evaluate(last_obs_dict["critic_obs"]).detach()
+        last_values = self.critic.evaluate(last_obs_dict["critic_obs"]).detach()
         advantage = 0
-        
-        values = policy_state_dict['values']
-        dones = policy_state_dict['dones']
-        rewards = policy_state_dict['rewards']
-        
+
+        values = policy_state_dict["values"]
+        dones = policy_state_dict["dones"]
+        rewards = policy_state_dict["rewards"]
+
         last_values = last_values.to(self.device)
         values = values.to(self.device)
         dones = dones.to(self.device)
         rewards = rewards.to(self.device)
-        
+
         returns = torch.zeros_like(values)
-        
+
         num_steps = returns.shape[0]
-        
+
         for step in reversed(range(num_steps)):
             if step == num_steps - 1:
                 next_values = last_values
             else:
                 next_values = values[step + 1]
             next_is_not_terminal = 1.0 - dones[step].float()
-            delta = rewards[step] + next_is_not_terminal * self.gamma * next_values - values[step]
+            delta = (
+                rewards[step]
+                + next_is_not_terminal * self.gamma * next_values
+                - values[step]
+            )
             advantage = delta + next_is_not_terminal * self.gamma * self.lam * advantage
             returns[step] = advantage + values[step]
 
@@ -337,16 +388,20 @@ class PPO(BaseAlgo):
         advantages = returns - values
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         return returns, advantages
-    
+
     def _training_step(self):
         loss_dict = self._init_loss_dict_at_training_step()
 
-        generator = self.storage.mini_batch_generator(self.num_mini_batches, self.num_learning_epochs)
+        generator = self.storage.mini_batch_generator(
+            self.num_mini_batches, self.num_learning_epochs
+        )
 
         for policy_state_dict in generator:
             # Move everything to the device
             for policy_state_key in policy_state_dict.keys():
-                policy_state_dict[policy_state_key] = policy_state_dict[policy_state_key].to(self.device)
+                policy_state_dict[policy_state_key] = policy_state_dict[
+                    policy_state_key
+                ].to(self.device)
             loss_dict = self._update_algo_step(policy_state_dict, loss_dict)
 
         num_updates = self.num_learning_epochs * self.num_mini_batches
@@ -354,28 +409,28 @@ class PPO(BaseAlgo):
             loss_dict[key] /= num_updates
         self.storage.clear()
         return loss_dict
-    
+
     def _init_loss_dict_at_training_step(self):
         loss_dict = {}
-        loss_dict['Value'] = 0
-        loss_dict['Surrogate'] = 0
-        loss_dict['Entropy'] = 0
+        loss_dict["Value"] = 0
+        loss_dict["Surrogate"] = 0
+        loss_dict["Entropy"] = 0
         loss_dict["KL"] = 0
         return loss_dict
-    
+
     def _update_algo_step(self, policy_state_dict, loss_dict):
         loss_dict = self._update_ppo(policy_state_dict, loss_dict)
         return loss_dict
-    
+
     def _compute_ppo_loss(self, policy_state_dict):
-        actions_batch = policy_state_dict['actions']
+        actions_batch = policy_state_dict["actions"]
         # target_values_batch = policy_state_dict['returns'] # This is wrong
-        target_values_batch = policy_state_dict['values'] # This is correct
-        advantages_batch = policy_state_dict['advantages']
-        returns_batch = policy_state_dict['returns']
-        old_actions_log_prob_batch = policy_state_dict['actions_log_prob']
-        old_mu_batch = policy_state_dict['action_mean']
-        old_sigma_batch = policy_state_dict['action_sigma']
+        target_values_batch = policy_state_dict["values"]  # This is correct
+        advantages_batch = policy_state_dict["advantages"]
+        returns_batch = policy_state_dict["returns"]
+        old_actions_log_prob_batch = policy_state_dict["actions_log_prob"]
+        old_mu_batch = policy_state_dict["action_mean"]
+        old_sigma_batch = policy_state_dict["action_sigma"]
 
         self.actor.act(policy_state_dict["actor_obs"])
         actions_log_prob_batch = self.actor.get_actions_log_prob(actions_batch)
@@ -385,36 +440,51 @@ class PPO(BaseAlgo):
         entropy_batch = self.actor.entropy
 
         # KL
-        if self.desired_kl != None and self.schedule == 'adaptive':
+        if self.desired_kl != None and self.schedule == "adaptive":
             with torch.inference_mode():
                 kl = torch.sum(
-                    torch.log(sigma_batch / old_sigma_batch + 1.e-5) + 
-                    (torch.square(old_sigma_batch) + torch.square(old_mu_batch - mu_batch)) / (2.0 * torch.square(sigma_batch) + 1.e-5) - 0.5, axis=-1)
+                    torch.log(sigma_batch / old_sigma_batch + 1.0e-5)
+                    + (
+                        torch.square(old_sigma_batch)
+                        + torch.square(old_mu_batch - mu_batch)
+                    )
+                    / (2.0 * torch.square(sigma_batch) + 1.0e-5)
+                    - 0.5,
+                    axis=-1,
+                )
                 kl_mean = torch.mean(kl)
-                
+
                 if kl_mean > self.desired_kl * 2.0:
                     self.actor_learning_rate = max(1e-5, self.actor_learning_rate / 1.5)
-                    self.critic_learning_rate = max(1e-5, self.critic_learning_rate / 1.5)
+                    self.critic_learning_rate = max(
+                        1e-5, self.critic_learning_rate / 1.5
+                    )
                 elif kl_mean < self.desired_kl / 2.0 and kl_mean > 0.0:
                     self.actor_learning_rate = min(1e-2, self.actor_learning_rate * 1.5)
-                    self.critic_learning_rate = min(1e-2, self.critic_learning_rate * 1.5)
+                    self.critic_learning_rate = min(
+                        1e-2, self.critic_learning_rate * 1.5
+                    )
 
                 for param_group in self.actor_optimizer.param_groups:
-                    param_group['lr'] = self.actor_learning_rate
+                    param_group["lr"] = self.actor_learning_rate
                 for param_group in self.critic_optimizer.param_groups:
-                    param_group['lr'] = self.critic_learning_rate
+                    param_group["lr"] = self.critic_learning_rate
 
         # Surrogate loss
-        ratio = torch.exp(actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch))
+        ratio = torch.exp(
+            actions_log_prob_batch - torch.squeeze(old_actions_log_prob_batch)
+        )
         surrogate = -torch.squeeze(advantages_batch) * ratio
-        surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(ratio, 1.0 - self.clip_param,
-                                                                        1.0 + self.clip_param)
+        surrogate_clipped = -torch.squeeze(advantages_batch) * torch.clamp(
+            ratio, 1.0 - self.clip_param, 1.0 + self.clip_param
+        )
         surrogate_loss = torch.max(surrogate, surrogate_clipped).mean()
 
         # Value function loss
         if self.use_clipped_value_loss:
-            value_clipped = target_values_batch + (value_batch - target_values_batch).clamp(-self.clip_param,
-                                                                                            self.clip_param)
+            value_clipped = target_values_batch + (
+                value_batch - target_values_batch
+            ).clamp(-self.clip_param, self.clip_param)
             value_losses = (value_batch - returns_batch).pow(2)
             value_losses_clipped = (value_clipped - returns_batch).pow(2)
             value_loss = torch.max(value_losses, value_losses_clipped).mean()
@@ -423,13 +493,22 @@ class PPO(BaseAlgo):
 
         entropy_loss = entropy_batch.mean()
         actor_loss = surrogate_loss - self.entropy_coef * entropy_loss
-        
+
         critic_loss = self.value_loss_coef * value_loss
-        
-        return actor_loss, critic_loss, value_loss, surrogate_loss, entropy_loss, kl_mean
-    
+
+        return (
+            actor_loss,
+            critic_loss,
+            value_loss,
+            surrogate_loss,
+            entropy_loss,
+            kl_mean,
+        )
+
     def _update_ppo(self, policy_state_dict, loss_dict):
-        actor_loss, critic_loss, value_loss, surrogate_loss, entropy_loss, kl_mean = self._compute_ppo_loss(policy_state_dict)
+        actor_loss, critic_loss, value_loss, surrogate_loss, entropy_loss, kl_mean = (
+            self._compute_ppo_loss(policy_state_dict)
+        )
 
         self.actor_optimizer.zero_grad()
         self.critic_optimizer.zero_grad()
@@ -444,9 +523,9 @@ class PPO(BaseAlgo):
         self.actor_optimizer.step()
         self.critic_optimizer.step()
 
-        loss_dict['Value'] += value_loss.item()
-        loss_dict['Surrogate'] += surrogate_loss.item()
-        loss_dict['Entropy'] += entropy_loss.item()
+        loss_dict["Value"] += value_loss.item()
+        loss_dict["Surrogate"] += surrogate_loss.item()
+        loss_dict["Entropy"] += entropy_loss.item()
         loss_dict["KL"] += kl_mean.item()
         return loss_dict
 
@@ -454,24 +533,20 @@ class PPO(BaseAlgo):
         self.actor_learning_rate = actor_learning_rate
         self.critic_learning_rate = critic_learning_rate
 
-
     @property
     def inference_model(self):
-        return {
-            "actor": self.actor,
-            "critic": self.critic
-        }
+        return {"actor": self.actor, "critic": self.critic}
 
     def _post_epoch_logging(self, log_dict, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
-        self.tot_time += log_dict['collection_time'] + log_dict['learn_time']
-        iteration_time = log_dict['collection_time'] + log_dict['learn_time']
+        self.tot_time += log_dict["collection_time"] + log_dict["learn_time"]
+        iteration_time = log_dict["collection_time"] + log_dict["learn_time"]
 
-        ep_string = f''
-        if log_dict['ep_infos']:
-            for key in log_dict['ep_infos'][0]:
+        ep_string = f""
+        if log_dict["ep_infos"]:
+            for key in log_dict["ep_infos"][0]:
                 infotensor = torch.tensor([], device=self.device)
-                for ep_info in log_dict['ep_infos']:
+                for ep_info in log_dict["ep_infos"]:
                     # handle scalar and zero dimensional tensor infos
                     if not isinstance(ep_info[key], torch.Tensor):
                         ep_info[key] = torch.Tensor([ep_info[key]])
@@ -479,14 +554,18 @@ class PPO(BaseAlgo):
                         ep_info[key] = ep_info[key].unsqueeze(0)
                     infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
                 value = torch.mean(infotensor)
-                self.writer.add_scalar('Episode/' + key, value, log_dict['it'])
+                self.writer.add_scalar("Episode/" + key, value, log_dict["it"])
                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
 
         train_log_dict = {}
         mean_std = self.actor.std.mean()
-        fps = int(self.num_steps_per_env * self.env.num_envs / (log_dict['collection_time'] + log_dict['learn_time']))
-        train_log_dict['fps'] = fps
-        train_log_dict['mean_std'] = mean_std.item()
+        fps = int(
+            self.num_steps_per_env
+            * self.env.num_envs
+            / (log_dict["collection_time"] + log_dict["learn_time"])
+        )
+        train_log_dict["fps"] = fps
+        train_log_dict["mean_std"] = mean_std.item()
 
         env_log_dict = self.episode_env_tensors.mean_and_clear()
         env_log_dict = {f"Env/{k}": v for k, v in env_log_dict.items()}
@@ -495,22 +574,26 @@ class PPO(BaseAlgo):
 
         str = f" \033[1m Learning iteration {log_dict['it']}/{self.current_learning_iteration + log_dict['num_learning_iterations']} \033[0m "
 
-        if len(log_dict['rewbuffer']) > 0:
-            log_string = (f"""{str.center(width, ' ')}\n\n"""
-                            f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict[
+        if len(log_dict["rewbuffer"]) > 0:
+            log_string = (
+                f"""{str.center(width, ' ')}\n\n"""
+                f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (Collection: {log_dict[
                             'collection_time']:.3f}s, Learning {log_dict['learn_time']:.3f}s)\n"""
-                        #   f"""{'Value function loss:':>{pad}} {log_dict['mean_value_loss']:.4f}\n"""
-                        #   f"""{'Surrogate loss:':>{pad}} {log_dict['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {train_log_dict['mean_std']:.2f}\n"""
-                          f"""{'Mean reward:':>{pad}} {statistics.mean(log_dict['rewbuffer']):.2f}\n"""
-                          f"""{'Mean episode length:':>{pad}} {statistics.mean(log_dict['lenbuffer']):.2f}\n""")
+                #   f"""{'Value function loss:':>{pad}} {log_dict['mean_value_loss']:.4f}\n"""
+                #   f"""{'Surrogate loss:':>{pad}} {log_dict['mean_surrogate_loss']:.4f}\n"""
+                f"""{'Mean action noise std:':>{pad}} {train_log_dict['mean_std']:.2f}\n"""
+                f"""{'Mean reward:':>{pad}} {statistics.mean(log_dict['rewbuffer']):.2f}\n"""
+                f"""{'Mean episode length:':>{pad}} {statistics.mean(log_dict['lenbuffer']):.2f}\n"""
+            )
         else:
-            log_string = (f"""{str.center(width, ' ')}\n\n"""
-                          f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (collection: {log_dict[
+            log_string = (
+                f"""{str.center(width, ' ')}\n\n"""
+                f"""{'Computation:':>{pad}} {train_log_dict['fps']:.0f} steps/s (collection: {log_dict[
                             'collection_time']:.3f}s, learning {log_dict['learn_time']:.3f}s)\n"""
-                        #   f"""{'Value function loss:':>{pad}} {log_dict['mean_value_loss']:.4f}\n"""
-                        #   f"""{'Surrogate loss:':>{pad}} {log_dict['mean_surrogate_loss']:.4f}\n"""
-                          f"""{'Mean action noise std:':>{pad}} {train_log_dict['mean_std']:.2f}\n""")
+                #   f"""{'Value function loss:':>{pad}} {log_dict['mean_value_loss']:.4f}\n"""
+                #   f"""{'Surrogate loss:':>{pad}} {log_dict['mean_surrogate_loss']:.4f}\n"""
+                f"""{'Mean action noise std:':>{pad}} {train_log_dict['mean_std']:.2f}\n"""
+            )
 
         env_log_string = ""
         for k, v in env_log_dict.items():
@@ -518,37 +601,69 @@ class PPO(BaseAlgo):
             env_log_string += f"{entry}\n"
         log_string += env_log_string
         log_string += ep_string
-        log_string += (f"""{'-' * width}\n"""
-                       f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
-                       f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
-                       f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
-                       f"""{'ETA:':>{pad}} {self.tot_time / (log_dict['it'] + 1) * (
-                               log_dict['num_learning_iterations'] - log_dict['it']):.1f}s\n""")
+        log_string += (
+            f"""{'-' * width}\n"""
+            f"""{'Total timesteps:':>{pad}} {self.tot_timesteps}\n"""
+            f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
+            f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
+            f"""{'ETA:':>{pad}} {self.tot_time / (log_dict['it'] + 1) * (
+                               log_dict['num_learning_iterations'] - log_dict['it']):.1f}s\n"""
+        )
         log_string += f"Logging Directory: {self.log_dir}"
 
         # Use rich Live to update a specific section of the console
-        with Live(Panel(log_string, title="Training Log"), refresh_per_second=4, console=console):
+        with Live(
+            Panel(log_string, title="Training Log"),
+            refresh_per_second=4,
+            console=console,
+        ):
             # Your training loop or other operations
             pass
 
     def _logging_to_writer(self, log_dict, train_log_dict, env_log_dict):
         # Logging Loss Dict
-        for loss_key, loss_value in log_dict['loss_dict'].items():
-            self.writer.add_scalar(f'Loss/{loss_key}', loss_value, log_dict['it'])
-        self.writer.add_scalar('Loss/actor_learning_rate', self.actor_learning_rate, log_dict['it'])
-        self.writer.add_scalar('Loss/critic_learning_rate', self.critic_learning_rate, log_dict['it'])
-        self.writer.add_scalar('Policy/mean_noise_std', train_log_dict['mean_std'], log_dict['it'])
-        self.writer.add_scalar('Perf/total_fps', train_log_dict['fps'], log_dict['it'])
-        self.writer.add_scalar('Perf/collection time', log_dict['collection_time'], log_dict['it'])
-        self.writer.add_scalar('Perf/learning_time', log_dict['learn_time'], log_dict['it'])
-        if len(log_dict['rewbuffer']) > 0:
-            self.writer.add_scalar('Train/mean_reward', statistics.mean(log_dict['rewbuffer']), log_dict['it'])
-            self.writer.add_scalar('Train/mean_episode_length', statistics.mean(log_dict['lenbuffer']), log_dict['it'])
-            self.writer.add_scalar('Train/mean_reward/time', statistics.mean(log_dict['rewbuffer']), self.tot_time)
-            self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(log_dict['lenbuffer']), self.tot_time)
+        for loss_key, loss_value in log_dict["loss_dict"].items():
+            self.writer.add_scalar(f"Loss/{loss_key}", loss_value, log_dict["it"])
+        self.writer.add_scalar(
+            "Loss/actor_learning_rate", self.actor_learning_rate, log_dict["it"]
+        )
+        self.writer.add_scalar(
+            "Loss/critic_learning_rate", self.critic_learning_rate, log_dict["it"]
+        )
+        self.writer.add_scalar(
+            "Policy/mean_noise_std", train_log_dict["mean_std"], log_dict["it"]
+        )
+        self.writer.add_scalar("Perf/total_fps", train_log_dict["fps"], log_dict["it"])
+        self.writer.add_scalar(
+            "Perf/collection time", log_dict["collection_time"], log_dict["it"]
+        )
+        self.writer.add_scalar(
+            "Perf/learning_time", log_dict["learn_time"], log_dict["it"]
+        )
+        if len(log_dict["rewbuffer"]) > 0:
+            self.writer.add_scalar(
+                "Train/mean_reward",
+                statistics.mean(log_dict["rewbuffer"]),
+                log_dict["it"],
+            )
+            self.writer.add_scalar(
+                "Train/mean_episode_length",
+                statistics.mean(log_dict["lenbuffer"]),
+                log_dict["it"],
+            )
+            self.writer.add_scalar(
+                "Train/mean_reward/time",
+                statistics.mean(log_dict["rewbuffer"]),
+                self.tot_time,
+            )
+            self.writer.add_scalar(
+                "Train/mean_episode_length/time",
+                statistics.mean(log_dict["lenbuffer"]),
+                self.tot_time,
+            )
         if len(env_log_dict) > 0:
             for k, v in env_log_dict.items():
-                self.writer.add_scalar(k, v, log_dict['it'])
+                self.writer.add_scalar(k, v, log_dict["it"])
 
     ##########################################################################################
     # Code for Evaluation
@@ -596,7 +711,9 @@ class PPO(BaseAlgo):
     def _create_eval_callbacks(self):
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
-                self.eval_callbacks.append(instantiate(self.config.eval_callbacks[cb], training_loop=self))
+                self.eval_callbacks.append(
+                    instantiate(self.config.eval_callbacks[cb], training_loop=self)
+                )
 
     def _pre_evaluate_policy(self, reset_env=True):
         self._eval_mode()
@@ -612,7 +729,7 @@ class PPO(BaseAlgo):
             c.on_post_evaluate_policy()
 
     def _pre_eval_env_step(self, actor_state: dict):
-        actions = self.eval_policy(actor_state["obs"]['actor_obs'])
+        actions = self.eval_policy(actor_state["obs"]["actor_obs"])
         actor_state.update({"actions": actions})
         for c in self.eval_callbacks:
             actor_state = c.on_pre_eval_env_step(actor_state)
@@ -624,7 +741,7 @@ class PPO(BaseAlgo):
         return actor_state
 
     def _get_inference_policy(self, device=None):
-        self.actor.eval() # switch to evaluation mode (dropout for example)
+        self.actor.eval()  # switch to evaluation mode (dropout for example)
         if device is not None:
             self.actor.to(device)
         return self.actor.act_inference

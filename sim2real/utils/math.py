@@ -5,6 +5,7 @@ import numpy as np
 # Quaternion operations
 # =============================================================================
 
+
 def quat_rotate_inverse(q: np.ndarray, v: np.ndarray) -> np.ndarray:
     q_w = q[:, 0]
     q_vec = q[:, 1:]
@@ -171,6 +172,7 @@ def rpy_to_quat(rpy):
 # Vector and matrix operations
 # =============================================================================
 
+
 def normalize(x, eps: float = 1e-9):
     """Normalize a vector to unit length"""
     return x / np.linalg.norm(x, axis=-1, keepdims=True).clip(min=eps, max=None)
@@ -220,6 +222,7 @@ def skew_symmetric(p):
 # =============================================================================
 # Angle operations
 # =============================================================================
+
 
 def wrap_to_pi(angles):
     """Wrap angles to the range [-π, π]"""

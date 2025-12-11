@@ -11,6 +11,7 @@ from omni.isaac.lab.managers import SceneEntityCfg
 
 from omni.isaac.lab.envs import ManagerBasedEnv
 
+
 def resolve_dist_fn(
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
 ):
@@ -27,6 +28,7 @@ def resolve_dist_fn(
 
     return dist_fn
 
+
 def randomize_body_com(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor | None,
@@ -34,7 +36,7 @@ def randomize_body_com(
     distribution_params: tuple[float, float] | tuple[torch.Tensor, torch.Tensor],
     operation: Literal["add", "abs", "scale"],
     distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
-    num_envs: int = 1, # number of environments
+    num_envs: int = 1,  # number of environments
 ):
     """Randomize the com of the bodies by adding, scaling or setting random values.
 
@@ -63,15 +65,22 @@ def randomize_body_com(
     # get the current masses of the bodies (num_assets, num_bodies)
     coms = asset.root_physx_view.get_coms()
     # apply randomization on default values
-    coms[env_ids[:, None], body_ids] = env.default_coms[env_ids[:, None], body_ids].clone()
+    coms[env_ids[:, None], body_ids] = env.default_coms[
+        env_ids[:, None], body_ids
+    ].clone()
 
     dist_fn = resolve_dist_fn(distribution)
 
     if isinstance(distribution_params[0], torch.Tensor):
-        distribution_params = (distribution_params[0].to(coms.device), distribution_params[1].to(coms.device))
+        distribution_params = (
+            distribution_params[0].to(coms.device),
+            distribution_params[1].to(coms.device),
+        )
 
     env.base_com_bias[env_ids, :] = dist_fn(
-        *distribution_params, (env_ids.shape[0], env.base_com_bias.shape[1]), device=coms.device
+        *distribution_params,
+        (env_ids.shape[0], env.base_com_bias.shape[1]),
+        device=coms.device,
     )
 
     # sample from the given range

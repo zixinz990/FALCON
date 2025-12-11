@@ -13,29 +13,30 @@ from loguru import logger
 
 from utils.config_utils import *  # noqa: E402, F403
 
+
 @hydra.main(config_path="config", config_name="base", version_base="1.1")
 def main(config: OmegaConf):
-    simulator_type = config.simulator['_target_'].split('.')[-1]
-    if simulator_type == 'IsaacSim':
+    simulator_type = config.simulator["_target_"].split(".")[-1]
+    if simulator_type == "IsaacSim":
         from omni.isaac.lab.app import AppLauncher
         import argparse
+
         parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
         AppLauncher.add_app_launcher_args(parser)
-        
+
         args_cli, hydra_args = parser.parse_known_args()
         sys.argv = [sys.argv[0]] + hydra_args
         args_cli.num_envs = config.num_envs
         args_cli.seed = config.seed
-        args_cli.env_spacing = config.env.config.env_spacing # config.env_spacing
+        args_cli.env_spacing = config.env.config.env_spacing  # config.env_spacing
         args_cli.output_dir = config.output_dir
         args_cli.headless = config.headless
-        
-        app_launcher = AppLauncher(args_cli)
-        simulation_app = app_launcher.app  
-        
-    if simulator_type == 'IsaacGym':
-        import isaacgym  # noqa: F401
 
+        app_launcher = AppLauncher(args_cli)
+        simulation_app = app_launcher.app
+
+    if simulator_type == "IsaacGym":
+        import isaacgym  # noqa: F401
 
     # have to import torch after isaacgym
     import torch  # noqa: E402
@@ -67,21 +68,23 @@ def main(config: OmegaConf):
         wandb_dir = Path(config.wandb.wandb_dir)
         wandb_dir.mkdir(exist_ok=True, parents=True)
         logger.info(f"Saving wandb logs to {wandb_dir}")
-        wandb.init(project=project_name, 
-                entity=config.wandb.wandb_entity,
-                name=run_name,
-                sync_tensorboard=True,
-                config=unresolved_conf,
-                dir=wandb_dir)
-    
-    if hasattr(config, 'device'):
+        wandb.init(
+            project=project_name,
+            entity=config.wandb.wandb_entity,
+            name=run_name,
+            sync_tensorboard=True,
+            config=unresolved_conf,
+            dir=wandb_dir,
+        )
+
+    if hasattr(config, "device"):
         if config.device is not None:
             device = config.device
         else:
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
     else:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    
+
     pre_process_config(config)
 
     # torch.set_float32_matmul_precision("medium")
@@ -91,9 +94,10 @@ def main(config: OmegaConf):
 
     if config.seed is not None:
         seeding(config.seed, torch_deterministic=config.torch_deterministic)
-    config.env.config.save_rendering_dir = str(Path(config.experiment_dir) / "renderings_training")
+    config.env.config.save_rendering_dir = str(
+        Path(config.experiment_dir) / "renderings_training"
+    )
     env: BaseEnv = instantiate(config=config.env, device=device)
-
 
     experiment_save_dir = Path(config.experiment_dir)
     experiment_save_dir.mkdir(exist_ok=True, parents=True)
@@ -102,7 +106,9 @@ def main(config: OmegaConf):
     with open(experiment_save_dir / "config.yaml", "w") as file:
         OmegaConf.save(unresolved_conf, file)
 
-    algo: BaseAlgo = instantiate(device=device, env=env, config=config.algo, log_dir=experiment_save_dir)
+    algo: BaseAlgo = instantiate(
+        device=device, env=env, config=config.algo, log_dir=experiment_save_dir
+    )
     algo.setup()
 
     if config.checkpoint is not None:
@@ -111,8 +117,9 @@ def main(config: OmegaConf):
     # handle saving config
     algo.learn()
 
-    if simulator_type == 'IsaacSim':
+    if simulator_type == "IsaacSim":
         simulation_app.close()
+
 
 if __name__ == "__main__":
     main()

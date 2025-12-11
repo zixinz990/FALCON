@@ -25,7 +25,9 @@ class Robot:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
-    parser.add_argument("--config", type=str, default="config/h1.yaml", help="config file")
+    parser.add_argument(
+        "--config", type=str, default="config/h1.yaml", help="config file"
+    )
     args = parser.parse_args()
 
     with open(args.config) as file:

@@ -20,19 +20,17 @@ from rich.progress import track
 from rich.console import Console
 from rich.panel import Panel
 from rich.live import Live
+
 console = Console()
+
 
 ##################################################################
 ######## Note: This agent is ONLY for EVALUATION purposes ########
 ##################################################################
 class PPOLocoManip(BaseAlgo):
-    def __init__(self,
-                 env: BaseTask,
-                 config,
-                 log_dir=None,
-                 device='cpu'):
+    def __init__(self, env: BaseTask, config, log_dir=None, device="cpu"):
 
-        self.device= device
+        self.device = device
         self.env = env
         self.config = config
         self.log_dir = log_dir
@@ -46,15 +44,19 @@ class PPOLocoManip(BaseAlgo):
         self.ep_infos = []
         self.rewbuffer = deque(maxlen=100)
         self.lenbuffer = deque(maxlen=100)
-        self.cur_reward_sum = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
-        self.cur_episode_length = torch.zeros(self.env.num_envs, dtype=torch.float, device=self.device)
+        self.cur_reward_sum = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device
+        )
+        self.cur_episode_length = torch.zeros(
+            self.env.num_envs, dtype=torch.float, device=self.device
+        )
 
         self.eval_callbacks: list[RL_EvalCallback] = []
         self.episode_env_tensors = TensorAverageMeterDict()
         _ = self.env.reset_all()
 
         # Actor observations for stand and loco policies
-        self.actor_obs = ['actor_stand_obs', 'actor_loco_obs']
+        self.actor_obs = ["actor_stand_obs", "actor_loco_obs"]
 
     def _init_config(self):
         # Env related Config
@@ -71,13 +73,13 @@ class PPOLocoManip(BaseAlgo):
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor_stand,
             num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std
+            init_noise_std=self.config.init_noise_std,
         ).to(self.device)
         self.actor_loco = PPOActor(
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor_loco,
             num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std
+            init_noise_std=self.config.init_noise_std,
         ).to(self.device)
         self.actor = [self.actor_stand, self.actor_loco]
 
@@ -94,14 +96,14 @@ class PPOLocoManip(BaseAlgo):
             logger.info(f"Loading locomotion checkpoint from {ckpt_loco_path}")
             loaded_dict_loco = torch.load(ckpt_loco_path, map_location=self.device)
             self.actor[1].load_state_dict(loaded_dict_loco["actor_model_state_dict"])
-        return loaded_dict_stand['infos'], loaded_dict_loco["infos"]
+        return loaded_dict_stand["infos"], loaded_dict_loco["infos"]
 
     def _process_env_step(self, rewards, dones, infos):
         self.actor[self.env.control_mode].reset(dones)
 
     def _actor_act_step(self, obs_dict):
         return self.actor[self.env.control_mode].act(obs_dict)
-    
+
     @property
     def inference_model(self):
         return self.actor
@@ -154,7 +156,9 @@ class PPOLocoManip(BaseAlgo):
     def _create_eval_callbacks(self):
         if self.config.eval_callbacks is not None:
             for cb in self.config.eval_callbacks:
-                self.eval_callbacks.append(instantiate(self.config.eval_callbacks[cb], training_loop=self))
+                self.eval_callbacks.append(
+                    instantiate(self.config.eval_callbacks[cb], training_loop=self)
+                )
 
     def _pre_evaluate_policy(self, reset_env=True):
         self._eval_mode()
@@ -188,5 +192,4 @@ class PPOLocoManip(BaseAlgo):
         if device is not None:
             self.actor[0].to(device)
             self.actor[1].to(device)
-        return [self.actor[0].act_inference,
-                self.actor[1].act_inference]
+        return [self.actor[0].act_inference, self.actor[1].act_inference]

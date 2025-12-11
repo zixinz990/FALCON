@@ -1,4 +1,3 @@
-
 class Point:
     # this is for visualization
     def __init__(self, pt):

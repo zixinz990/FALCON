@@ -7,26 +7,26 @@ from sim2real.utils.robot import Robot
 
 class BasicCommandSender(ABC):
     """Abstract base class for command sender implementations."""
-    
+
     def __init__(self, config):
         self.config = config
         self.robot = Robot(self.config)
         self.sdk_type = self.config.get("SDK_TYPE", "unitree")
         self.motor_type = self.config.get("MOTOR_TYPE", "serial")
-        
+
         # Initialize control gains
         self.kp_level = 1.0
         self.kd_level = 1.0
         self.waist_kp_level = 1.0
-            
+
         # Initialize weak motor joint index
         self.weak_motor_joint_index = []
         if self.robot.WeakMotorJointIndex:
             for _, value in self.robot.WeakMotorJointIndex.items():
                 self.weak_motor_joint_index.append(value)
-            
+
         self.no_action = 0
-        
+
         # Initialize SDK-specific components
         self._init_sdk_components()
 
@@ -47,7 +47,7 @@ class BasicCommandSender(ABC):
     def _set_motor_command(self, motor_cmd, motor_id, joint_id, cmd_q, cmd_dq, cmd_tau):
         """Set motor command for a specific motor."""
         default_q = self.robot.DEFAULT_MOTOR_ANGLES
-        
+
         if joint_id == -1 or self.no_action:
             motor_cmd.q = default_q[motor_id]
             motor_cmd.dq = 0.0
@@ -60,14 +60,14 @@ class BasicCommandSender(ABC):
             motor_cmd.tau = cmd_tau[joint_id]
             motor_cmd.kp = self.robot.MOTOR_KP[motor_id] * self.kp_level
             motor_cmd.kd = self.robot.MOTOR_KD[motor_id] * self.kd_level
-    
+
     def _fill_motor_commands(self, motor_cmd, cmd_q, cmd_dq, cmd_tau):
         """Fill motor commands for all motors."""
         joint2motor = self.robot.JOINT2MOTOR
         motor2joint = self.robot.MOTOR2JOINT
-        
+
         for i in range(self.robot.NUM_MOTORS):
             m_id = joint2motor[i]
             j_id = motor2joint[i]
             cmd = motor_cmd[m_id]
-            self._set_motor_command(cmd, m_id, j_id, cmd_q, cmd_dq, cmd_tau) 
+            self._set_motor_command(cmd, m_id, j_id, cmd_q, cmd_dq, cmd_tau)

@@ -13,12 +13,16 @@ from .weighted_moving_filter import WeightedMovingFilter
 
 # import numpy as np
 
-parent2_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+parent2_dir = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
 sys.path.append(parent2_dir)
 
 
 class G1_29_ArmIK:  # noqa: N801
-    def __init__(self, Unit_Test=False, Visualization=False, robot_config=None):  # noqa: N803
+    def __init__(
+        self, Unit_Test=False, Visualization=False, robot_config=None
+    ):  # noqa: N803
         np.set_printoptions(precision=5, suppress=True, linewidth=200)
 
         self.Unit_Test = Unit_Test
@@ -85,19 +89,27 @@ class G1_29_ArmIK:  # noqa: N801
         # Creating collision pairs and filering out neighboring links
         self.geom_model.addAllCollisionPairs()
         # Get the kinematic adjacency from the model
-        adjacent_pairs = {(self.reduced_robot.model.parents[i], i) for i in range(1, self.reduced_robot.model.njoints)}
+        adjacent_pairs = {
+            (self.reduced_robot.model.parents[i], i)
+            for i in range(1, self.reduced_robot.model.njoints)
+        }
         # Filter out neighboring links
         filtered_pairs = []
         for cp in self.geom_model.collisionPairs:
             link1 = self.geom_model.geometryObjects[cp.first].parentJoint
             link2 = self.geom_model.geometryObjects[cp.second].parentJoint
-            if (link1, link2) not in adjacent_pairs and (link2, link1) not in adjacent_pairs:
+            if (link1, link2) not in adjacent_pairs and (
+                link2,
+                link1,
+            ) not in adjacent_pairs:
                 filtered_pairs.append(cp)
         self.geom_model.collisionPairs[:] = filtered_pairs
         self.data = self.reduced_robot.model.createData()
         self.geom_data = pin.GeometryData(self.geom_model)
         print("num collision pairs - initial:", len(self.geom_model.collisionPairs))
-        print(f"Number of geometry objects: {len(self.reduced_robot.collision_model.geometryObjects)}")
+        print(
+            f"Number of geometry objects: {len(self.reduced_robot.collision_model.geometryObjects)}"
+        )
 
         # Creating Casadi models and data for symbolic computing
         self.cmodel = cpin.Model(self.reduced_robot.model)
@@ -129,8 +141,12 @@ class G1_29_ArmIK:  # noqa: N801
             [self.cq, self.cTf_l, self.cTf_r],
             [
                 casadi.vertcat(
-                    cpin.log3(self.cdata.oMf[self.L_hand_id].rotation @ self.cTf_l[:3, :3].T),
-                    cpin.log3(self.cdata.oMf[self.R_hand_id].rotation @ self.cTf_r[:3, :3].T),
+                    cpin.log3(
+                        self.cdata.oMf[self.L_hand_id].rotation @ self.cTf_l[:3, :3].T
+                    ),
+                    cpin.log3(
+                        self.cdata.oMf[self.R_hand_id].rotation @ self.cTf_r[:3, :3].T
+                    ),
                 )
             ],
         )
@@ -141,19 +157,28 @@ class G1_29_ArmIK:  # noqa: N801
         self.var_q_last = self.opti.parameter(self.reduced_robot.model.nq)  # for smooth
         self.param_tf_l = self.opti.parameter(4, 4)
         self.param_tf_r = self.opti.parameter(4, 4)
-        self.translational_cost = casadi.sumsqr(self.translational_error(self.var_q, self.param_tf_l, self.param_tf_r))
-        self.rotation_cost = casadi.sumsqr(self.rotational_error(self.var_q, self.param_tf_l, self.param_tf_r))
+        self.translational_cost = casadi.sumsqr(
+            self.translational_error(self.var_q, self.param_tf_l, self.param_tf_r)
+        )
+        self.rotation_cost = casadi.sumsqr(
+            self.rotational_error(self.var_q, self.param_tf_l, self.param_tf_r)
+        )
         self.regularization_cost = casadi.sumsqr(self.var_q)
         self.smooth_cost = casadi.sumsqr(self.var_q - self.var_q_last)
 
         # Setting optimization constraints and goals
         self.opti.subject_to(
             self.opti.bounded(
-                self.reduced_robot.model.lowerPositionLimit, self.var_q, self.reduced_robot.model.upperPositionLimit
+                self.reduced_robot.model.lowerPositionLimit,
+                self.var_q,
+                self.reduced_robot.model.upperPositionLimit,
             )
         )
         self.opti.minimize(
-            50 * self.translational_cost + self.rotation_cost + 0.02 * self.regularization_cost + 0.1 * self.smooth_cost
+            50 * self.translational_cost
+            + self.rotation_cost
+            + 0.02 * self.regularization_cost
+            + 0.1 * self.smooth_cost
         )
 
         opts = {
@@ -177,20 +202,39 @@ class G1_29_ArmIK:  # noqa: N801
         if self.Visualization:
             # Initialize the Meshcat visualizer for visualization
             self.vis = MeshcatVisualizer(
-                self.reduced_robot.model, self.reduced_robot.collision_model, self.reduced_robot.visual_model
+                self.reduced_robot.model,
+                self.reduced_robot.collision_model,
+                self.reduced_robot.visual_model,
             )
             self.vis.initViewer(open=True)
             self.vis.loadViewerModel("pinocchio")
-            self.vis.displayFrames(True, frame_ids=[107, 108], axis_length=0.15, axis_width=10)
+            self.vis.displayFrames(
+                True, frame_ids=[107, 108], axis_length=0.15, axis_width=10
+            )
             self.vis.display(pin.neutral(self.reduced_robot.model))
 
             # Enable the display of end effector target frames with short axis lengths and greater width.
             frame_viz_names = ["L_ee_target", "R_ee_target"]
             FRAME_AXIS_POSITIONS = (
-                np.array([[0, 0, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0], [0, 0, 0], [0, 0, 1]]).astype(np.float32).T
+                np.array(
+                    [[0, 0, 0], [1, 0, 0], [0, 0, 0], [0, 1, 0], [0, 0, 0], [0, 0, 1]]
+                )
+                .astype(np.float32)
+                .T
             )
             FRAME_AXIS_COLORS = (
-                np.array([[1, 0, 0], [1, 0.6, 0], [0, 1, 0], [0.6, 1, 0], [0, 0, 1], [0, 0.6, 1]]).astype(np.float32).T
+                np.array(
+                    [
+                        [1, 0, 0],
+                        [1, 0.6, 0],
+                        [0, 1, 0],
+                        [0.6, 1, 0],
+                        [0, 0, 1],
+                        [0, 0.6, 1],
+                    ]
+                )
+                .astype(np.float32)
+                .T
             )
             axis_length = 0.1
             axis_width = 10
@@ -217,7 +261,14 @@ class G1_29_ArmIK:  # noqa: N801
         collision_detected = False
 
         # Compute all the collisions
-        pin.computeCollisions(self.reduced_robot.model, self.data, self.geom_model, self.geom_data, q, False)
+        pin.computeCollisions(
+            self.reduced_robot.model,
+            self.data,
+            self.geom_model,
+            self.geom_data,
+            q,
+            False,
+        )
 
         # print("Start checking collision")
         # Print the status of collision for all collision pairs
@@ -251,8 +302,12 @@ class G1_29_ArmIK:  # noqa: N801
         self.opti.set_initial(self.var_q, self.init_data)
 
         if self.Visualization:
-            self.vis.viewer["L_ee_target"].set_transform(left_wrist)  # for visualization
-            self.vis.viewer["R_ee_target"].set_transform(right_wrist)  # for visualization
+            self.vis.viewer["L_ee_target"].set_transform(
+                left_wrist
+            )  # for visualization
+            self.vis.viewer["R_ee_target"].set_transform(
+                right_wrist
+            )  # for visualization
 
         self.opti.set_value(self.param_tf_l, left_wrist)
         self.opti.set_value(self.param_tf_r, right_wrist)
@@ -277,14 +332,22 @@ class G1_29_ArmIK:  # noqa: N801
             self.init_data = sol_q
 
             sol_tauff = pin.rnea(
-                self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv)
+                self.reduced_robot.model,
+                self.reduced_robot.data,
+                sol_q,
+                v,
+                np.zeros(self.reduced_robot.model.nv),
             )
 
             # Apply External Force to the EE
             external_force_L = pin.Force(EE_efrc_L)
             external_force_R = pin.Force(EE_efrc_R)
-            J_L = pin.computeFrameJacobian(self.reduced_robot.model, self.reduced_robot.data, sol_q, self.L_hand_id)
-            J_R = pin.computeFrameJacobian(self.reduced_robot.model, self.reduced_robot.data, sol_q, self.R_hand_id)
+            J_L = pin.computeFrameJacobian(
+                self.reduced_robot.model, self.reduced_robot.data, sol_q, self.L_hand_id
+            )
+            J_R = pin.computeFrameJacobian(
+                self.reduced_robot.model, self.reduced_robot.data, sol_q, self.R_hand_id
+            )
             tau_ext_L = J_L.T @ external_force_L.vector
             tau_ext_R = J_R.T @ external_force_R.vector
 
@@ -311,7 +374,11 @@ class G1_29_ArmIK:  # noqa: N801
             self.init_data = sol_q
 
             sol_tauff = pin.rnea(
-                self.reduced_robot.model, self.reduced_robot.data, sol_q, v, np.zeros(self.reduced_robot.model.nv)
+                self.reduced_robot.model,
+                self.reduced_robot.data,
+                sol_q,
+                v,
+                np.zeros(self.reduced_robot.model.nv),
             )
 
             print(
@@ -336,8 +403,12 @@ class G1_29_ArmIK:  # noqa: N801
     def get_q_tau(self, L_tf_target, R_tf_target, EE_efrc_L, EE_efrc_R):  # noqa: N803
         """Interpolate and solve IK for the given target poses."""
         # Interpolate positions and orientations
-        self.current_L_tf = (1 - self.speed_factor) * self.current_L_tf + self.speed_factor * L_tf_target.translation
-        self.current_R_tf = (1 - self.speed_factor) * self.current_R_tf + self.speed_factor * R_tf_target.translation
+        self.current_L_tf = (
+            1 - self.speed_factor
+        ) * self.current_L_tf + self.speed_factor * L_tf_target.translation
+        self.current_R_tf = (
+            1 - self.speed_factor
+        ) * self.current_R_tf + self.speed_factor * R_tf_target.translation
 
         self.current_L_orientation = self.current_L_orientation.slerp(
             self.speed_factor, pin.Quaternion(L_tf_target.rotation)
@@ -346,8 +417,12 @@ class G1_29_ArmIK:  # noqa: N801
             self.speed_factor, pin.Quaternion(R_tf_target.rotation)
         )
 
-        L_tf_interpolated = pin.SE3(self.current_L_orientation.toRotationMatrix(), self.current_L_tf)
-        R_tf_interpolated = pin.SE3(self.current_R_orientation.toRotationMatrix(), self.current_R_tf)
+        L_tf_interpolated = pin.SE3(
+            self.current_L_orientation.toRotationMatrix(), self.current_L_tf
+        )
+        R_tf_interpolated = pin.SE3(
+            self.current_R_orientation.toRotationMatrix(), self.current_R_tf
+        )
 
         # Solve IK
         sol_q, sol_tauff = self.solve_ik(
@@ -359,7 +434,9 @@ class G1_29_ArmIK:  # noqa: N801
         )
         return sol_q, sol_tauff
 
-    def get_target_waypoint_error(self, current_q, L_tf_target, R_tf_target):  # noqa: N803
+    def get_target_waypoint_error(
+        self, current_q, L_tf_target, R_tf_target
+    ):  # noqa: N803
         current_q = np.asarray(current_q).reshape(-1)
         pin.framesForwardKinematics(self.reduced_robot.model, self.data, current_q)
 
@@ -395,7 +472,9 @@ class G1_29_ArmIK:  # noqa: N801
 
         return L_ee_pose, R_ee_pose
 
-    def generate_waypoints_SE(self, start_pose: SE3, end_pose: SE3, num_points: int):  # noqa: N802
+    def generate_waypoints_SE(
+        self, start_pose: SE3, end_pose: SE3, num_points: int
+    ):  # noqa: N802
         """
         Generate SE3 waypoints interpolating from start to end pose.
 

@@ -8,23 +8,25 @@ import torch
 import scipy.ndimage.filters as filters
 
 from collections import OrderedDict
+
 # from abc import ABCMeta, abstractmethod, classmethod
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 import json
 
-from isaac_utils.rotations import(
-    quat_mul_norm, 
-    quat_inverse, 
-    quat_identity_like, 
-    transform_mul, 
-    transform_from_rotation_translation, 
-    transform_rotation, 
-    transform_translation
+from isaac_utils.rotations import (
+    quat_mul_norm,
+    quat_inverse,
+    quat_identity_like,
+    transform_mul,
+    transform_from_rotation_translation,
+    transform_rotation,
+    transform_translation,
 )
 
+
 class NumpyEncoder(json.JSONEncoder):
-    """ Special json encoder for numpy types """
+    """Special json encoder for numpy types"""
 
     def default(self, obj):
         if isinstance(
@@ -59,14 +61,14 @@ def json_numpy_obj_hook(dct):
 
 
 class Serializable:
-    """ Implementation to read/write to file.
-    All class the is inherited from this class needs to implement to_dict() and 
+    """Implementation to read/write to file.
+    All class the is inherited from this class needs to implement to_dict() and
     from_dict()
     """
 
     @classmethod
     def from_dict(cls, dict_repr, *args, **kwargs):
-        """ Read the object from an ordered dictionary
+        """Read the object from an ordered dictionary
 
         :param dict_repr: the ordered dictionary that is used to construct the object
         :type dict_repr: OrderedDict
@@ -77,15 +79,15 @@ class Serializable:
 
     @abstractmethod
     def to_dict(self):
-        """ Construct an ordered dictionary from the object
-        
+        """Construct an ordered dictionary from the object
+
         :rtype: OrderedDict
         """
         pass
 
     @classmethod
     def from_file(cls, path, *args, **kwargs):
-        """ Read the object from a file (either .npy or .json)
+        """Read the object from a file (either .npy or .json)
 
         :param path: path of the file
         :type path: string
@@ -105,7 +107,7 @@ class Serializable:
         return cls.from_dict(d, *args, **kwargs)
 
     def to_file(self, path: str) -> None:
-        """ Write the object to a file (either .npy or .json)
+        """Write the object to a file (either .npy or .json)
 
         :param path: path of the file
         :type path: string
@@ -120,10 +122,11 @@ class Serializable:
         elif path.endswith(".npy"):
             np.save(path, d)
 
+
 class TensorUtils(Serializable):
     @classmethod
     def from_dict(cls, dict_repr, *args, **kwargs):
-        """ Read the object from an ordered dictionary
+        """Read the object from an ordered dictionary
 
         :param dict_repr: the ordered dictionary that is used to construct the object
         :type dict_repr: OrderedDict
@@ -133,24 +136,21 @@ class TensorUtils(Serializable):
         return torch.from_numpy(dict_repr["arr"].astype(dict_repr["context"]["dtype"]))
 
     def to_dict(self):
-        """ Construct an ordered dictionary from the object
-        
+        """Construct an ordered dictionary from the object
+
         :rtype: OrderedDict
         """
         return NotImplemented
 
+
 def tensor_to_dict(x):
-    """ Construct an ordered dictionary from the object
-    
+    """Construct an ordered dictionary from the object
+
     :rtype: OrderedDict
     """
     x_np = x.numpy()
-    return {
-        "arr": x_np,
-        "context": {
-            "dtype": x_np.dtype.name
-        }
-    }
+    return {"arr": x_np, "context": {"dtype": x_np.dtype.name}}
+
 
 class SkeletonTree(Serializable):
     """
@@ -314,7 +314,9 @@ class SkeletonTree(Serializable):
         def _add_xml_node(xml_node, parent_index, node_index):
             node_name = xml_node.attrib.get("name")
             # parse the local translation into float list
-            pos = np.fromstring(xml_node.attrib.get("pos", "0 0 0"), dtype=float, sep=" ")
+            pos = np.fromstring(
+                xml_node.attrib.get("pos", "0 0 0"), dtype=float, sep=" "
+            )
             node_names.append(node_name)
             parent_indices.append(parent_index)
             local_translation.append(pos)
@@ -1309,7 +1311,8 @@ class SkeletonMotion(SkeletonState):
                 ("skeleton_tree", self.skeleton_tree.to_dict()),
                 ("is_local", self.is_local),
                 ("fps", self.fps),
-        ])
+            ]
+        )
 
     # @classmethod
     # def from_fbx(

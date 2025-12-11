@@ -19,8 +19,12 @@ class LocoManipSimulator(BaseSimulator):
         super().__init__(config)
         self.EE_xfrc = 0
         self.t = 0
-        self.left_hand_link_name = self.config.get("left_hand_link_name", "left_hand_link")
-        self.right_hand_link_name = self.config.get("right_hand_link_name", "right_hand_link")
+        self.left_hand_link_name = self.config.get(
+            "left_hand_link_name", "left_hand_link"
+        )
+        self.right_hand_link_name = self.config.get(
+            "right_hand_link_name", "right_hand_link"
+        )
 
     def init_scene(self):
         super().init_scene()
@@ -37,8 +41,10 @@ class LocoManipSimulator(BaseSimulator):
             self.robot_bridge.PublishWirelessController()
         if self.config["ENABLE_ELASTIC_BAND"]:
             if self.elastic_band.enable:
-                self.mj_data.xfrc_applied[self.band_attached_link, :3] = self.elastic_band.Advance(
-                    self.mj_data.qpos[:3], self.mj_data.qvel[:3]
+                self.mj_data.xfrc_applied[self.band_attached_link, :3] = (
+                    self.elastic_band.Advance(
+                        self.mj_data.qpos[:3], self.mj_data.qvel[:3]
+                    )
                 )
 
         if self.elastic_band.estimate:
@@ -46,9 +52,15 @@ class LocoManipSimulator(BaseSimulator):
             # Yuanhang: Testing the estimated force
             base_target_axis = np.array([-1.0, 0.0, 0.0])
             body_quat = self.mj_data.qpos[3:7]
-            force_in_global = quat_rotate_numpy(np.array([body_quat]), base_target_axis * self.EE_xfrc)
-            self.mj_data.xfrc_applied[self.mj_model.body(self.left_hand_link_name).id, 0:3] = force_in_global
-            self.mj_data.xfrc_applied[self.mj_model.body(self.right_hand_link_name).id, 0:3] = force_in_global
+            force_in_global = quat_rotate_numpy(
+                np.array([body_quat]), base_target_axis * self.EE_xfrc
+            )
+            self.mj_data.xfrc_applied[
+                self.mj_model.body(self.left_hand_link_name).id, 0:3
+            ] = force_in_global
+            self.mj_data.xfrc_applied[
+                self.mj_model.body(self.right_hand_link_name).id, 0:3
+            ] = force_in_global
             self.t += self.dt
 
         self.compute_torques()
@@ -61,7 +73,9 @@ class LocoManipSimulator(BaseSimulator):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
-    parser.add_argument("--config", type=str, default="config/g1/g1_29dof.yaml", help="config file")
+    parser.add_argument(
+        "--config", type=str, default="config/g1/g1_29dof.yaml", help="config file"
+    )
     args = parser.parse_args()
 
     with open(args.config) as file:

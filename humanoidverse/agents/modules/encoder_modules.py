@@ -12,6 +12,6 @@ class Estimator(nn.Module):
 
     # def estimate(self, obs_history):
     #     return self.module(obs_history)
-    
+
     def forward(self, obs_history):
         return self.module(obs_history)

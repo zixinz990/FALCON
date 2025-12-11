@@ -1,6 +1,7 @@
 import torch
 from torch.nn import Module
 
+
 class RL_EvalCallback(Module):
     def __init__(self, config, training_loop):
         super().__init__()
@@ -13,9 +14,9 @@ class RL_EvalCallback(Module):
 
     def on_pre_eval_env_step(self, actor_state):
         return actor_state
-    
+
     def on_post_eval_env_step(self, actor_state):
         return actor_state
-    
+
     def on_post_evaluate_policy(self):
         pass

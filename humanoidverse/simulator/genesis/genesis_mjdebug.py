@@ -1,6 +1,7 @@
 import sys
 import os
 from loguru import logger
+
 # from isaacgym import gymtorch, gymapi, gymutil
 import torch
 import genesis as gs
@@ -16,15 +17,17 @@ import copy
 import mujoco
 import mujoco.viewer
 
+
 class Genesis(BaseSimulator):
     """
-    Base class for robotic simulation environments, providing a framework for simulation setup, 
+    Base class for robotic simulation environments, providing a framework for simulation setup,
     environment creation, and control over robotic assets and simulation properties.
     """
+
     def __init__(self, config, device):
         """
         Initializes the base simulator with configuration settings and simulation device.
-        
+
         Args:
             config (dict): Configuration dictionary for the simulation.
             device (str): Device type for simulation ('cpu' or 'cuda').
@@ -35,7 +38,7 @@ class Genesis(BaseSimulator):
         self.device = device
         self.sim_device = device
         self.headless = False
-        gs.init(backend=gs.gpu if 'cuda' in self.device else gs.cpu)
+        gs.init(backend=gs.gpu if "cuda" in self.device else gs.cpu)
 
     # ----- Configuration Setup Methods -----
 
@@ -50,7 +53,7 @@ class Genesis(BaseSimulator):
 
     def setup(self):
         """
-        Initializes the simulator parameters and environment. This method should be implemented 
+        Initializes the simulator parameters and environment. This method should be implemented
         by subclasses to set specific simulator configurations.
         """
 
@@ -87,19 +90,21 @@ class Genesis(BaseSimulator):
 
     def setup_terrain(self, mesh_type):
         """
-        Configures the terrain based on specified mesh type. 
+        Configures the terrain based on specified mesh type.
 
         Args:
             mesh_type (str): Type of terrain mesh ('plane', 'heightfield', 'trimesh').
         """
-        if mesh_type == 'plane':
+        if mesh_type == "plane":
             # this is somehow deprecated
             # self.scene.add_entity(
             #     gs.morphs.URDF(file='urdf/plane/plane.urdf', scale=20.0, fixed=True),
             # )
             plane = self.scene.add_entity(gs.morphs.Plane())
-        elif mesh_type == 'trimesh':
-            raise NotImplementedError(f"Mesh type {mesh_type} hasn't been implemented in genesis subclass.")
+        elif mesh_type == "trimesh":
+            raise NotImplementedError(
+                f"Mesh type {mesh_type} hasn't been implemented in genesis subclass."
+            )
 
     # ----- Robot Asset Setup Methods -----
 
@@ -116,15 +121,12 @@ class Genesis(BaseSimulator):
             self.robot_cfg.init_state.pos, device=self.device
         )
         # self.base_init_pos[2] += 1.5
-        self.base_init_quat = torch.tensor(
-            init_quat_wxyz, device=self.device
-        )
-
+        self.base_init_quat = torch.tensor(init_quat_wxyz, device=self.device)
 
         asset_root = self.robot_cfg.asset.asset_root
         # asset_file = self.robot_cfg.asset.urdf_file
         asset_file = self.robot_cfg.asset.xml_file
-        asset_file = 'g1/g1_29dof_old.xml'
+        asset_file = "g1/g1_29dof_old.xml"
         asset_path = os.path.join(asset_root, asset_file)
         # self.robot = self.scene.add_entity(
         #     gs.morphs.URDF(
@@ -145,32 +147,28 @@ class Genesis(BaseSimulator):
             visualize_contact=False,
         )
 
-
-        asset_file = 'g1/scene_29dof.xml'
+        asset_file = "g1/scene_29dof.xml"
         asset_path = os.path.join(asset_root, asset_file)
         self.mj_model = mujoco.MjModel.from_xml_path(asset_path)
         self.mj_model.opt.timestep = self.sim_dt
         self.mj_data = mujoco.MjData(self.mj_model)
         self.mj_viewer = mujoco.viewer.launch_passive(
-                self.mj_model, self.mj_data, show_left_ui=True, show_right_ui=True
+            self.mj_model, self.mj_data, show_left_ui=True, show_right_ui=True
         )
-
 
         dof_names_list = copy.deepcopy(self.robot_cfg.dof_names)
         # names to indices
         self.dof_ids = [
-            self.robot.get_joint(name).dof_idx_local
-            for name in dof_names_list
+            self.robot.get_joint(name).dof_idx_local for name in dof_names_list
         ]
-        self.is_copy_mj =True
+        self.is_copy_mj = True
 
         self.rigid = self.scene.sim.rigid_solver
 
         self.body_names = self.robot_cfg.body_names
-        self.num_bodies = len(self.body_names)                # = len(self.rigid_solver.links) - 1
+        self.num_bodies = len(self.body_names)  # = len(self.rigid_solver.links) - 1
         self.dof_names = dof_names_list
-        self.num_dof = len(dof_names_list)                    # = len(self.rigid_solver.joints) - 2
-
+        self.num_dof = len(dof_names_list)  # = len(self.rigid_solver.joints) - 2
 
         self.mj_names = []
         for i in range(self.mj_model.njnt):
@@ -179,7 +177,7 @@ class Genesis(BaseSimulator):
 
         self.dof_mj_ids = []
         for name in self.dof_names:
-            self.dof_mj_ids.append(self.mj_names.index(name)+5)
+            self.dof_mj_ids.append(self.mj_names.index(name) + 5)
 
         self.dof_our2mj = {}
         for i in range(len(self.dof_ids)):
@@ -189,8 +187,8 @@ class Genesis(BaseSimulator):
         for i in range(len(self.dof_mj_ids)):
             self.dof_mj2our[i] = self.dof_ids.index(self.dof_mj_ids[i])
 
-
         # from IPython import embed; embed()
+
     # ----- Environment Creation Methods -----
 
     def find_rigid_body_indice(self, body_name):
@@ -236,14 +234,30 @@ class Genesis(BaseSimulator):
     def get_dof_limits_properties(self):
         """
         Retrieves the DOF (degrees of freedom) limits and properties.
-        
+
         Returns:
             Tuple of tensors representing position limits, velocity limits, and torque limits for each DOF.
         """
-        self.hard_dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.sim_device, requires_grad=False)
-        self.dof_pos_limits = torch.zeros(self.num_dof, 2, dtype=torch.float, device=self.sim_device, requires_grad=False)
-        self.dof_vel_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False)
-        self.torque_limits = torch.zeros(self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False)
+        self.hard_dof_pos_limits = torch.zeros(
+            self.num_dof,
+            2,
+            dtype=torch.float,
+            device=self.sim_device,
+            requires_grad=False,
+        )
+        self.dof_pos_limits = torch.zeros(
+            self.num_dof,
+            2,
+            dtype=torch.float,
+            device=self.sim_device,
+            requires_grad=False,
+        )
+        self.dof_vel_limits = torch.zeros(
+            self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False
+        )
+        self.torque_limits = torch.zeros(
+            self.num_dof, dtype=torch.float, device=self.sim_device, requires_grad=False
+        )
         for i in range(self.num_dof):
             self.hard_dof_pos_limits[i, 0] = self.robot_cfg.dof_pos_lower_limit_list[i]
             self.hard_dof_pos_limits[i, 1] = self.robot_cfg.dof_pos_upper_limit_list[i]
@@ -254,8 +268,12 @@ class Genesis(BaseSimulator):
             # soft limits
             m = (self.dof_pos_limits[i, 0] + self.dof_pos_limits[i, 1]) / 2
             r = self.dof_pos_limits[i, 1] - self.dof_pos_limits[i, 0]
-            self.dof_pos_limits[i, 0] = m - 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
-            self.dof_pos_limits[i, 1] = m + 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
+            self.dof_pos_limits[i, 0] = (
+                m - 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
+            )
+            self.dof_pos_limits[i, 1] = (
+                m + 0.5 * r * self.cfg.rewards.reward_limit.soft_dof_pos_limit
+            )
         return self.dof_pos_limits, self.dof_vel_limits, self.torque_limits
 
     # ----- Simulation Preparation and Refresh Methods -----
@@ -274,20 +292,44 @@ class Genesis(BaseSimulator):
         if False:
             self.base_pos = self.robot.get_pos()
             base_quat = self.robot.get_quat()
-            self.base_quat = base_quat[..., [1, 2, 3, 0,]]
+            self.base_quat = base_quat[
+                ...,
+                [
+                    1,
+                    2,
+                    3,
+                    0,
+                ],
+            ]
 
             inv_base_quat = gs_inv_quat(base_quat)
-            self.base_lin_vel = gs_transform_by_quat(self.robot.get_vel(), inv_base_quat)
-            self.base_ang_vel = gs_transform_by_quat(self.robot.get_ang(), inv_base_quat)
+            self.base_lin_vel = gs_transform_by_quat(
+                self.robot.get_vel(), inv_base_quat
+            )
+            self.base_ang_vel = gs_transform_by_quat(
+                self.robot.get_ang(), inv_base_quat
+            )
 
         self.base_pos = tt(self.mj_data.qpos[:3])
         base_quat = tt(self.mj_data.qpos[3:7])
-        self.base_quat = base_quat[..., [1, 2, 3, 0,]]
+        self.base_quat = base_quat[
+            ...,
+            [
+                1,
+                2,
+                3,
+                0,
+            ],
+        ]
 
         inv_base_quat = gs_inv_quat(base_quat)
 
-        self.base_lin_vel = gs_transform_by_quat(tt(self.mj_data.qvel[:3]), inv_base_quat)
-        self.base_ang_vel = gs_transform_by_quat(tt(self.mj_data.qvel[3:6]), inv_base_quat)
+        self.base_lin_vel = gs_transform_by_quat(
+            tt(self.mj_data.qvel[:3]), inv_base_quat
+        )
+        self.base_ang_vel = gs_transform_by_quat(
+            tt(self.mj_data.qvel[3:6]), inv_base_quat
+        )
 
         self.all_root_states = torch.cat(
             [
@@ -295,7 +337,8 @@ class Genesis(BaseSimulator):
                 self.base_quat,
                 self.base_lin_vel,
                 self.base_ang_vel,
-            ], dim=-1
+            ],
+            dim=-1,
         )
         self.robot_root_states = torch.cat(
             [
@@ -303,7 +346,8 @@ class Genesis(BaseSimulator):
                 self.base_quat,
                 self.base_lin_vel,
                 self.base_ang_vel,
-            ], dim=-1
+            ],
+            dim=-1,
         )
 
         self.dof_pos = self.robot.get_dofs_position(self.dof_ids)
@@ -323,12 +367,24 @@ class Genesis(BaseSimulator):
 
         self.base_pos = tt(self.mj_data.qpos[:3])
         base_quat = tt(self.mj_data.qpos[3:7])
-        self.base_quat = base_quat[..., [1, 2, 3, 0,]]
+        self.base_quat = base_quat[
+            ...,
+            [
+                1,
+                2,
+                3,
+                0,
+            ],
+        ]
 
         inv_base_quat = gs_inv_quat(base_quat)
 
-        self.base_lin_vel = gs_transform_by_quat(tt(self.mj_data.qvel[:3]), inv_base_quat)
-        self.base_ang_vel = gs_transform_by_quat(tt(self.mj_data.qvel[3:6]), inv_base_quat)
+        self.base_lin_vel = gs_transform_by_quat(
+            tt(self.mj_data.qvel[:3]), inv_base_quat
+        )
+        self.base_ang_vel = gs_transform_by_quat(
+            tt(self.mj_data.qvel[3:6]), inv_base_quat
+        )
 
         self.all_root_states = torch.cat(
             [
@@ -336,7 +392,8 @@ class Genesis(BaseSimulator):
                 self.base_quat,
                 self.base_lin_vel,
                 self.base_ang_vel,
-            ], dim=-1
+            ],
+            dim=-1,
         )
         self.robot_root_states = self.all_root_states
         self.dof_pos = tt(self.mj_data.qpos[7:])
@@ -348,15 +405,27 @@ class Genesis(BaseSimulator):
         """
         self.refresh_sim_tensors_mujoco()
         # return
-        
+
         if False:
             self.base_pos = self.robot.get_pos()
             base_quat = self.robot.get_quat()
-            self.base_quat = base_quat[..., [1, 2, 3, 0,]]
+            self.base_quat = base_quat[
+                ...,
+                [
+                    1,
+                    2,
+                    3,
+                    0,
+                ],
+            ]
 
             inv_base_quat = gs_inv_quat(base_quat)
-            self.base_lin_vel = gs_transform_by_quat(self.robot.get_vel(), inv_base_quat)
-            self.base_ang_vel = gs_transform_by_quat(self.robot.get_ang(), inv_base_quat)
+            self.base_lin_vel = gs_transform_by_quat(
+                self.robot.get_vel(), inv_base_quat
+            )
+            self.base_ang_vel = gs_transform_by_quat(
+                self.robot.get_ang(), inv_base_quat
+            )
 
             self.all_root_states = torch.cat(
                 [
@@ -364,7 +433,8 @@ class Genesis(BaseSimulator):
                     self.base_quat,
                     self.base_lin_vel,
                     self.base_ang_vel,
-                ], dim=-1
+                ],
+                dim=-1,
             )
             self.robot_root_states = self.all_root_states
 
@@ -379,10 +449,11 @@ class Genesis(BaseSimulator):
         )
 
         self._rigid_body_pos = self.robot.get_links_pos()
-        self._rigid_body_rot = self.robot.get_links_quat()[..., [1, 2, 3, 0]] # (num_envs, 4) 3 isaacsim use wxyz, we keep xyzw for consistency
+        self._rigid_body_rot = self.robot.get_links_quat()[
+            ..., [1, 2, 3, 0]
+        ]  # (num_envs, 4) 3 isaacsim use wxyz, we keep xyzw for consistency
         self._rigid_body_vel = self.robot.get_links_vel()
         self._rigid_body_ang_vel = self.robot.get_links_ang()
-
 
     # ----- Control Application Methods -----
 
@@ -397,7 +468,7 @@ class Genesis(BaseSimulator):
         # torques *= 0.
         self.mj_data.ctrl = torques.cpu().numpy()[0]
         # self.robot.control_dofs_force(torques, self.dof_ids)
-    
+
     def set_actor_root_state_tensor(self, set_env_ids, root_states):
         """
         Sets the root state tensor for specified actors within environments.
@@ -412,7 +483,8 @@ class Genesis(BaseSimulator):
                 self.base_quat,
                 self.base_lin_vel,
                 self.base_ang_vel,
-            ], dim=-1
+            ],
+            dim=-1,
         )
         root_states = self.robot_root_states[set_env_ids]
 
@@ -422,32 +494,26 @@ class Genesis(BaseSimulator):
         base_ang_vel = root_states[..., 10:13]
 
         # reset root states - position
-        self.robot.set_pos(
-            base_pos, zero_velocity=False, envs_idx=set_env_ids
-        )
-        self.robot.set_quat(
-            base_quat, zero_velocity=False, envs_idx=set_env_ids
+        self.robot.set_pos(base_pos, zero_velocity=False, envs_idx=set_env_ids)
+        self.robot.set_quat(base_quat, zero_velocity=False, envs_idx=set_env_ids)
+        self.robot.set_dofs_velocity(
+            base_lin_vel, dofs_idx_local=[0, 1, 2], envs_idx=set_env_ids
         )
         self.robot.set_dofs_velocity(
-            base_lin_vel, dofs_idx_local=[0, 1, 2],  envs_idx=set_env_ids
-        )
-        self.robot.set_dofs_velocity(
-            base_ang_vel, dofs_idx_local=[3, 4, 5],  envs_idx=set_env_ids
+            base_ang_vel, dofs_idx_local=[3, 4, 5], envs_idx=set_env_ids
         )
 
         self.copy_to_mujoco()
 
-
-    
     def copy_to_mujoco(self):
         qpos = self.rigid.qpos.to_numpy().reshape(-1)[-36:]
-        qpos[-29:] = np.array([qpos[self.dof_our2mj[i]+7] for i in range(29)])
+        qpos[-29:] = np.array([qpos[self.dof_our2mj[i] + 7] for i in range(29)])
 
         qvel = self.rigid.dofs_state.vel.to_numpy().reshape(-1)[-35:]
-        qvel[-29:] = np.array([qvel[self.dof_our2mj[i]+6] for i in range(29)])
+        qvel[-29:] = np.array([qvel[self.dof_our2mj[i] + 6] for i in range(29)])
         self.mj_data.qpos = qpos
         self.mj_data.qvel = qvel
-    
+
     def set_dof_state_tensor(self, set_env_ids, dof_states):
         """
         Sets the DOF state tensor for specified actors within environments.
@@ -471,7 +537,6 @@ class Genesis(BaseSimulator):
             envs_idx=set_env_ids,
         )
 
-
         self.copy_to_mujoco()
 
     def simulate_at_each_physics_step(self):
@@ -479,6 +544,7 @@ class Genesis(BaseSimulator):
         Advances the simulation by a single physics step.
         """
         import time
+
         time.sleep(0.1)
         print("sim")
         # self.scene.step()
@@ -495,8 +561,6 @@ class Genesis(BaseSimulator):
 
         # self.rigid.dofs_state.vel.from_numpy(vel)
         # self.rigid.qpos.from_numpy(pos)
-
-        
 
         # self.rigid.dofs_state.vel = self.mj_data.qvel[self.dof_ids]
         self.mj_viewer.sync()
@@ -522,14 +586,18 @@ class Genesis(BaseSimulator):
     def dof_state(self):
         # This will always use the latest dof_pos and dof_vel
         return torch.cat([self.dof_pos[..., None], self.dof_vel[..., None]], dim=-1)
-    
+
     def add_visualize_entities(self, num_visualize_markers):
         # self.scene.add_entity(gs.morphs.Sphere())
         self.visualize_entities = []
         for i in range(num_visualize_markers):
-            self.visualize_entities.append(self.scene.add_entity(gs.morphs.Sphere(radius=0.04, visualization=True, collision=False)))
-    
-     # debug visualization
+            self.visualize_entities.append(
+                self.scene.add_entity(
+                    gs.morphs.Sphere(radius=0.04, visualization=True, collision=False)
+                )
+            )
+
+    # debug visualization
     def clear_lines(self):
         # self.scene.clear_debug_objects()
         pass

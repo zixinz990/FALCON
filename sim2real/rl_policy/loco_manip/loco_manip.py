@@ -17,15 +17,15 @@ from sim2real.utils.arm_ik.robot_arm_ik_g1_23dof import G1_29_ArmIK_NoWrists
 
 
 class LocoManipPolicy(DecLocomotionPolicy):
-    def __init__(
-        self, config, model_path, rl_rate=50, policy_action_scale=0.25
-    ):
+    def __init__(self, config, model_path, rl_rate=50, policy_action_scale=0.25):
         super().__init__(config, model_path, rl_rate, policy_action_scale)
 
         self.ref_upper_dof_pos = np.zeros((1, self.num_upper_dofs))
         self.ref_upper_dof_pos *= 0.0
         self.ref_upper_dof_pos += self.default_dof_angles[self.upper_dof_indices]
-        self.residual_upper_body_action = self.config.get("residual_upper_body_action", False)
+        self.residual_upper_body_action = self.config.get(
+            "residual_upper_body_action", False
+        )
 
         self.upper_body_controller = None
         if self.config.get("use_upper_body_controller", False):
@@ -59,7 +59,11 @@ class LocoManipPolicy(DecLocomotionPolicy):
             ]
         )
         self.EE_right_R = np.array(
-            [[np.cos(self.theta), -np.sin(self.theta), 0], [np.sin(self.theta), np.cos(self.theta), 0], [0, 0, 1]]
+            [
+                [np.cos(self.theta), -np.sin(self.theta), 0],
+                [np.sin(self.theta), np.cos(self.theta), 0],
+                [0, 0, 1],
+            ]
         )
         self.EE_left_x = 0.30
         self.EE_right_x = 0.30
@@ -135,31 +139,49 @@ class LocoManipPolicy(DecLocomotionPolicy):
         # import ipdb; ipdb.set_trace()
         # Clip q target
         if self.motor_pos_lower_limit_list and self.motor_pos_upper_limit_list:
-            q_target[0] = np.clip(q_target[0], self.motor_pos_lower_limit_list, self.motor_pos_upper_limit_list)
+            q_target[0] = np.clip(
+                q_target[0],
+                self.motor_pos_lower_limit_list,
+                self.motor_pos_upper_limit_list,
+            )
 
         # Send command
         cmd_q = q_target[0]
-        self.command_sender.send_command(cmd_q, cmd_dq, cmd_tau, robot_state_data[0, 7 : 7 + self.num_dofs])
+        self.command_sender.send_command(
+            cmd_q, cmd_dq, cmd_tau, robot_state_data[0, 7 : 7 + self.num_dofs]
+        )
 
     def update_waypoints(self):
         self.waypoints_left = [
-            pin.SE3(self.EE_left_R.astype(np.float64), np.array([self.EE_left_x, self.EE_left_y, self.EE_left_z]))
+            pin.SE3(
+                self.EE_left_R.astype(np.float64),
+                np.array([self.EE_left_x, self.EE_left_y, self.EE_left_z]),
+            )
         ]
         self.waypoints_right = [
-            pin.SE3(self.EE_right_R.astype(np.float64), np.array([self.EE_right_x, self.EE_right_y, self.EE_right_z]))
+            pin.SE3(
+                self.EE_right_R.astype(np.float64),
+                np.array([self.EE_right_x, self.EE_right_y, self.EE_right_z]),
+            )
         ]
 
     def handle_keyboard_button(self, keycode):
         super().handle_keyboard_button(keycode)
         if keycode == ",":
             self.waist_dofs_command[:, 0] -= 0.2
-            self.logger.info(colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green"))
+            self.logger.info(
+                colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green")
+            )
         elif keycode == ".":
             self.waist_dofs_command[:, 0] += 0.2
-            self.logger.info(colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green"))
+            self.logger.info(
+                colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green")
+            )
         elif keycode == "m":
             self.lin_vel_command[:, 0] = -1.0
-            self.logger.info(colored(f"lin_vel_command: {self.lin_vel_command}", "green"))
+            self.logger.info(
+                colored(f"lin_vel_command: {self.lin_vel_command}", "green")
+            )
         elif keycode in ["1", "2"]:
             self._handle_base_height_control(keycode)
 
@@ -169,10 +191,14 @@ class LocoManipPolicy(DecLocomotionPolicy):
             self._handle_joystick_base_height_control(cur_key)
         if cur_key == "Y+up":
             self.waist_dofs_command[:, 2] -= 0.1
-            self.logger.info(colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green"))
+            self.logger.info(
+                colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green")
+            )
         elif cur_key == "Y+down":
             self.waist_dofs_command[:, 2] += 0.1
-            self.logger.info(colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green"))
+            self.logger.info(
+                colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green")
+            )
         elif cur_key == "R1+up":
             self.EE_left_x += 0.05
             self.EE_right_x += 0.05
@@ -214,7 +240,11 @@ class LocoManipPolicy(DecLocomotionPolicy):
                 ]
             )
             self.EE_right_R = np.array(
-                [[np.cos(self.theta), -np.sin(self.theta), 0], [np.sin(self.theta), np.cos(self.theta), 0], [0, 0, 1]]
+                [
+                    [np.cos(self.theta), -np.sin(self.theta), 0],
+                    [np.sin(self.theta), np.cos(self.theta), 0],
+                    [0, 0, 1],
+                ]
             )
             self.update_waypoints()
             self.logger.info(colored(f"EE Wrist Yaw: {self.degrees}", "green"))
@@ -229,25 +259,39 @@ class LocoManipPolicy(DecLocomotionPolicy):
                 ]
             )
             self.EE_right_R = np.array(
-                [[np.cos(self.theta), -np.sin(self.theta), 0], [np.sin(self.theta), np.cos(self.theta), 0], [0, 0, 1]]
+                [
+                    [np.cos(self.theta), -np.sin(self.theta), 0],
+                    [np.sin(self.theta), np.cos(self.theta), 0],
+                    [0, 0, 1],
+                ]
             )
             self.update_waypoints()
             self.logger.info(colored(f"EE Wrist Yaw: {self.degrees}", "green"))
         elif cur_key == "select+left":
             self.waist_dofs_command[:, 0] -= 0.1
-            self.logger.info(colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green"))
+            self.logger.info(
+                colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green")
+            )
         elif cur_key == "select+right":
             self.waist_dofs_command[:, 0] += 0.1
-            self.logger.info(colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green"))
+            self.logger.info(
+                colored(f"waist yaw: {self.waist_dofs_command[:, 0]}", "green")
+            )
         elif cur_key == "select+up":
             self.waist_dofs_command[:, 2] -= 0.05
-            self.logger.info(colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green"))
+            self.logger.info(
+                colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green")
+            )
         elif cur_key == "select+down":
             self.waist_dofs_command[:, 2] += 0.05
-            self.logger.info(colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green"))
+            self.logger.info(
+                colored(f"waist pitch: {self.waist_dofs_command[:, 2]}", "green")
+            )
         elif cur_key == "A+B":
             self.command_sender.kp_level = 1.0
-            self.logger.info(colored(f"Debug kp level: {self.command_sender.kp_level}", "green"))
+            self.logger.info(
+                colored(f"Debug kp level: {self.command_sender.kp_level}", "green")
+            )
 
     def _handle_base_height_control(self, keycode):
         """Handle base height control."""
@@ -269,9 +313,12 @@ class LocoManipPolicy(DecLocomotionPolicy):
         print(f"Base height command: {self.base_height_command}")
         print(f"Waist dofs command: {self.waist_dofs_command}")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
-    parser.add_argument("--config", type=str, default="config/g1/g1_29dof.yaml", help="config file")
+    parser.add_argument(
+        "--config", type=str, default="config/g1/g1_29dof.yaml", help="config file"
+    )
     parser.add_argument("--model_path", type=str, help="path to the ONNX model file")
     args = parser.parse_args()
 
@@ -281,7 +328,9 @@ if __name__ == "__main__":
     # Use command line model_path if provided, otherwise use config model_path
     model_path = args.model_path if args.model_path else config.get("model_path")
     if not model_path:
-        raise ValueError("model_path must be provided either via --model_path argument or in config file")
+        raise ValueError(
+            "model_path must be provided either via --model_path argument or in config file"
+        )
 
     policy = LocoManipPolicy(
         config=config, model_path=model_path, rl_rate=50, policy_action_scale=0.25

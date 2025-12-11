@@ -143,6 +143,7 @@ def value_to_color(value, min_value, max_value):
     # Return the RGB color
     return red, green, blue
 
+
 def normalize(x, min_value, max_value, target_min=0.0, target_max=1.0):
     """
     Normalize a value from a given range to a target range.
@@ -154,6 +155,7 @@ def normalize(x, min_value, max_value, target_min=0.0, target_max=1.0):
     scaled = target_min + normalized * (target_max - target_min)
 
     return scaled
+
 
 def unnormalize(x, min_value, max_value, target_min=0.0, target_max=1.0):
     """

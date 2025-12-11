@@ -2,12 +2,13 @@ import torch
 import torch.nn as nn
 import inspect
 
+
 class BaseModule(nn.Module):
     def __init__(self, obs_dim_dict, module_config_dict):
         super(BaseModule, self).__init__()
         self.obs_dim_dict = obs_dim_dict
         self.module_config_dict = module_config_dict
-        self.history_length = module_config_dict.get('history_length', {})
+        self.history_length = module_config_dict.get("history_length", {})
 
         self._calculate_input_dim()
         self._calculate_output_dim()
@@ -16,40 +17,46 @@ class BaseModule(nn.Module):
     def _calculate_input_dim(self):
         # calculate input dimension based on the input specifications
         input_dim = 0
-        for each_input in self.module_config_dict['input_dim']:
+        for each_input in self.module_config_dict["input_dim"]:
             if each_input in self.obs_dim_dict:
                 # atomic observation type
-                input_dim += self.obs_dim_dict[each_input] * self.history_length.get(each_input, 1)
+                input_dim += self.obs_dim_dict[each_input] * self.history_length.get(
+                    each_input, 1
+                )
             elif isinstance(each_input, (int, float)):
                 # direct numeric input
                 input_dim += each_input
             else:
                 current_function_name = inspect.currentframe().f_code.co_name
-                raise ValueError(f"{current_function_name} - Unknown input type: {each_input}")
-        
+                raise ValueError(
+                    f"{current_function_name} - Unknown input type: {each_input}"
+                )
+
         self.input_dim = input_dim
 
     def _calculate_output_dim(self):
         output_dim = 0
-        for each_output in self.module_config_dict['output_dim']:
+        for each_output in self.module_config_dict["output_dim"]:
             if isinstance(each_output, (int, float)):
                 output_dim += each_output
             else:
                 current_function_name = inspect.currentframe().f_code.co_name
-                raise ValueError(f"{current_function_name} - Unknown output type: {each_output}")
+                raise ValueError(
+                    f"{current_function_name} - Unknown output type: {each_output}"
+                )
         self.output_dim = output_dim
 
     def _build_network_layer(self, layer_config):
-        if layer_config['type'] == 'MLP':
+        if layer_config["type"] == "MLP":
             self._build_mlp_layer(layer_config)
         else:
             raise NotImplementedError(f"Unsupported layer type: {layer_config['type']}")
-        
+
     def _build_mlp_layer(self, layer_config):
         layers = []
-        hidden_dims = layer_config['hidden_dims']
+        hidden_dims = layer_config["hidden_dims"]
         output_dim = self.output_dim
-        activation = getattr(nn, layer_config['activation'])()
+        activation = getattr(nn, layer_config["activation"])()
 
         layers.append(nn.Linear(self.input_dim, hidden_dims[0]))
         layers.append(activation)

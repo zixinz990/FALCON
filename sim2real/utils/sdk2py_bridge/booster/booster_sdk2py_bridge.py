@@ -4,7 +4,7 @@ from sim2real.utils.math import quat_to_rpy
 
 class BoosterSdk2Bridge(BasicSdk2Bridge):
     """Booster SDK2Py bridge implementation."""
-    
+
     def _init_sdk_components(self):
         """Initialize Booster SDK-specific components."""
         from booster_robotics_sdk_python import (
@@ -32,12 +32,18 @@ class BoosterSdk2Bridge(BasicSdk2Bridge):
             self.low_cmd.motor_cmd = self.motor_cmds
         else:
             # Raise an error if robot_type is not valid
-            raise ValueError(f"Invalid robot type '{robot_type}'. Expected 't1_23dof' or 't1_29dof'.")
-        
+            raise ValueError(
+                f"Invalid robot type '{robot_type}'. Expected 't1_23dof' or 't1_29dof'."
+            )
+
         # Booster sdk message
         self.low_state = LowState()
-        self.low_state.motor_state_serial = [MotorState() for _ in range(self.num_motor)]
-        self.low_state.motor_state_parallel = [MotorState() for _ in range(self.num_motor)]
+        self.low_state.motor_state_serial = [
+            MotorState() for _ in range(self.num_motor)
+        ]
+        self.low_state.motor_state_parallel = [
+            MotorState() for _ in range(self.num_motor)
+        ]
         self.low_state_puber = B1LowStatePublisher()
         self.low_cmd_suber = B1LowCmdSubscriber(self.LowCmdHandler)
         self.low_state_puber.InitChannel()
@@ -49,7 +55,9 @@ class BoosterSdk2Bridge(BasicSdk2Bridge):
         if msg:
             self.low_cmd = self.LowCmd()
             self.low_cmd.cmd_type = (
-                self.LowCmdType.SERIAL if self.motor_type == "serial" else self.LowCmdType.PARALLEL
+                self.LowCmdType.SERIAL
+                if self.motor_type == "serial"
+                else self.LowCmdType.PARALLEL
             )
             self.low_cmd.motor_cmd = msg.motor_cmd
 
@@ -71,7 +79,9 @@ class BoosterSdk2Bridge(BasicSdk2Bridge):
         elif self.motor_type == "parallel":
             motor_state = self.low_state.motor_state_parallel
         else:
-            raise ValueError(f"Invalid motor type '{self.motor_type}'. Expected 'serial' or 'parallel'.")
+            raise ValueError(
+                f"Invalid motor type '{self.motor_type}'. Expected 'serial' or 'parallel'."
+            )
 
         if self.use_sensor:
             for i in range(num_motors):
@@ -85,7 +95,9 @@ class BoosterSdk2Bridge(BasicSdk2Bridge):
                 m.q = qpos[7 + i]
                 m.dq = qvel[6 + i]
                 m.ddq = qacc[6 + i]
-                m.tau_est = actuator_force[6 + i] if self.free_base else actuator_force[i]
+                m.tau_est = (
+                    actuator_force[6 + i] if self.free_base else actuator_force[i]
+                )
 
         if self.use_sensor and self.have_frame_sensor_:
             quat = sensor[self.dim_motor_sensor + 0 : self.dim_motor_sensor + 4]

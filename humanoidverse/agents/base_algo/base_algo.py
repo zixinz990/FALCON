@@ -12,6 +12,7 @@ from hydra.utils import instantiate
 
 from humanoidverse.envs.base_task.base_task import BaseTask
 
+
 class BaseAlgo:
     def __init__(self, env: BaseTask, config, device):
         self.env = env
@@ -26,7 +27,7 @@ class BaseAlgo:
 
     def load(self, path):
         return NotImplementedError
-    
+
     @property
     def inference_model(self):
         return NotImplementedError

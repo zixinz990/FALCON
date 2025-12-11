@@ -1,4 +1,3 @@
-
 class Viewer:
     """This class handles controlling the camera associated with a viewport in the simulator.
 
