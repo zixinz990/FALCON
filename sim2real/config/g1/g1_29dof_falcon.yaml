@@ -30,7 +30,7 @@ VISUALIZE_PIN: False
 VISUALIZE_FORCES: False
 
 residual_upper_body_action: True # Whether to use residual upper body action for balancing
-use_upper_body_controller: True # Whether to use upper body controller
+use_upper_body_controller: False # Whether to use upper body controller
 
 GAIT_PERIOD: 0.9 # Gait period in seconds
 DESIRED_BASE_HEIGHT: 0.75 # Desired base height

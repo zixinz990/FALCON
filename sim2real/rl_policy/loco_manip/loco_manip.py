@@ -1,6 +1,10 @@
 import os
 import sys
 import time
+import threading
+import tkinter as tk
+from tkinter import ttk
+from functools import partial
 
 import numpy as np
 import argparse
@@ -16,12 +20,140 @@ from termcolor import colored
 from sim2real.utils.arm_ik.robot_arm_ik_g1_23dof import G1_29_ArmIK_NoWrists
 
 
+class JointControlGUI:
+    def __init__(self, policy):
+        self.policy = policy
+        self.root = tk.Tk()
+        self.root.title("FALCON Joint Control")
+        self.root.geometry("500x700")
+
+        # Create a scrollable frame
+        canvas = tk.Canvas(self.root)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        # Waist control
+        tk.Label(
+            self.scrollable_frame,
+            text="--- Waist Control ---",
+            font=("Helvetica", 12, "bold"),
+        ).pack(pady=10)
+
+        # Create 3 sliders for the 3 waist DOFs
+        waist_labels = ["Waist Yaw", "Waist Roll", "Waist Pitch"]
+        self.waist_sliders = []
+        for i in range(3):
+            frame = tk.Frame(self.scrollable_frame)
+            frame.pack(fill="x", padx=10, pady=2)
+            tk.Label(frame, text=waist_labels[i], width=25, anchor="w").pack(
+                side="left"
+            )
+
+            # Range: +/- 1.5 radians (~85 degrees)
+            slider = tk.Scale(
+                frame,
+                from_=-1.5,
+                to=1.5,
+                resolution=0.01,
+                orient="horizontal",
+                length=250,
+                command=partial(self.update_waist, i),
+            )
+            # Set initial value from policy
+            slider.set(self.policy.waist_dofs_command[0, i])
+            slider.pack(side="right")
+            self.waist_sliders.append(slider)
+
+        # Upper body control
+        upper_body_labels = [
+            "Left Shoulder Pitch",
+            "Left Shoulder Roll",
+            "Left Shoulder Yaw",
+            "Left Elbow",
+            "Left Wrist Roll",
+            "Left Wrist Pitch",
+            "Left Wrist Yaw",
+            "Right Shoulder Pitch",
+            "Right Shoulder Roll",
+            "Right Shoulder Yaw",
+            "Right Elbow",
+            "Right Wrist Roll",
+            "Right Wrist Pitch",
+            "Right Wrist Yaw",
+        ]
+        tk.Label(
+            self.scrollable_frame,
+            text="--- Upper Body Control ---",
+            font=("Helvetica", 12, "bold"),
+        ).pack(pady=10)
+
+        self.upper_sliders = []
+        # Create a slider for each upper body joint
+        for i in range(self.policy.num_upper_dofs):
+            frame = tk.Frame(self.scrollable_frame)
+            frame.pack(fill="x", padx=10, pady=2)
+            tk.Label(frame, text=upper_body_labels[i], width=25, anchor="w").pack(
+                side="left"
+            )
+
+            # Range: +/- 2.5 radians (~140 degrees) - adjusted for wider arm range
+            slider = tk.Scale(
+                frame,
+                from_=-2.5,
+                to=2.5,
+                resolution=0.01,
+                orient="horizontal",
+                length=250,
+                command=partial(self.update_upper, i),
+            )
+
+            # Set initial value from current policy state
+            initial_val = self.policy.ref_upper_dof_pos[0, i]
+            slider.set(initial_val)
+            slider.pack(side="right")
+            self.upper_sliders.append(slider)
+
+        tk.Label(
+            self.scrollable_frame,
+            text="Note: Disable 'use_upper_body_controller' in YAML\nto prevent IK from overwriting these values.",
+            fg="red",
+        ).pack(pady=10)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def update_waist(self, index, value):
+        # Update the waist command in the policy
+        self.policy.waist_dofs_command[0, index] = float(value)
+
+    def update_upper(self, index, value):
+        # Update the upper body reference position in the policy
+        self.policy.ref_upper_dof_pos[0, index] = float(value)
+
+    def on_closing(self):
+        self.root.destroy()
+        os._exit(0)  # Force exit to kill the policy thread
+
+    def run(self):
+        self.root.mainloop()
+
+
 class LocoManipPolicy(DecLocomotionPolicy):
     def __init__(self, config, model_path, rl_rate=50, policy_action_scale=0.25):
         super().__init__(config, model_path, rl_rate, policy_action_scale)
 
         self.ref_upper_dof_pos = np.zeros((1, self.num_upper_dofs))
         self.ref_upper_dof_pos *= 0.0
+        # Initialize with default angles
         self.ref_upper_dof_pos += self.default_dof_angles[self.upper_dof_indices]
         self.residual_upper_body_action = self.config.get(
             "residual_upper_body_action", False
@@ -106,8 +238,10 @@ class LocoManipPolicy(DecLocomotionPolicy):
         cmd_tau = np.zeros(self.num_dofs)
         # Get states
         robot_state_data = self.state_processor.robot_state_data
-        # self.robot_state_data_shm[0] = robot_state_data
-        # Apply upper body controller
+
+        # Apply upper body controller (IK)
+        # NOTE: If you are using the GUI sliders, this block might overwrite your slider values!
+        # You should set "use_upper_body_controller: False" in your YAML config to use the GUI fully.
         if self.upper_body_controller:
             # Control upper qpos and tau
             upper_body_qpos, _ = self.upper_body_controller.get_q_tau(
@@ -310,8 +444,9 @@ class LocoManipPolicy(DecLocomotionPolicy):
     def _print_control_status(self):
         """Print current control status."""
         super()._print_control_status()
-        print(f"Base height command: {self.base_height_command}")
-        print(f"Waist dofs command: {self.waist_dofs_command}")
+        # You can inspect these values changing as you move sliders
+        # print(f"Base height command: {self.base_height_command}")
+        # print(f"Waist dofs command: {self.waist_dofs_command}")
 
 
 if __name__ == "__main__":
@@ -335,4 +470,14 @@ if __name__ == "__main__":
     policy = LocoManipPolicy(
         config=config, model_path=model_path, rl_rate=50, policy_action_scale=0.25
     )
-    policy.run()
+
+    # --- GUI Setup ---
+    # We initialize the GUI in the main thread and run the policy in a daemon thread.
+    gui = JointControlGUI(policy)
+
+    # Start the policy loop in a separate thread so it doesn't block the GUI
+    policy_thread = threading.Thread(target=policy.run, daemon=True)
+    policy_thread.start()
+
+    # Start the GUI main loop
+    gui.run()
