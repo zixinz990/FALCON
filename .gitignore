@@ -73,3 +73,7 @@ booster_robotics_sdk/
 unitree_sdk2_python/
 !sim2real/requirements.txt
 !sim2real/models/**/*.onnx
+
+fcgym/
+fcreal/
+isaacgym/
