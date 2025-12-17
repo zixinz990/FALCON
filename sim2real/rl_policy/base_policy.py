@@ -145,7 +145,7 @@ class BasePolicy:
         self.lin_vel_command = np.array([[0.0, 0.0]])
         self.ang_vel_command = np.array([[0.0]])
         self.stand_command = np.array([[0]])
-        self.base_height_command = np.array([[self.desired_base_height]])
+        self.base_pos_command = np.array([[0.0, 0.0, self.desired_base_height]])
         self.ref_upper_dof_pos = np.zeros((1, self.num_upper_dofs))
         self.ref_upper_dof_pos *= 0.0
         self.ref_upper_dof_pos += self.default_dof_angles[self.upper_dof_indices]

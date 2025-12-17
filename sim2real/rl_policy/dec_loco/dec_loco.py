@@ -19,11 +19,31 @@ class DecLocomotionPolicy(BasePolicy):
         super().__init__(config, model_path, rl_rate, policy_action_scale)
         self.num_lower_dofs = self.num_dofs - self.num_upper_dofs
 
+    def base_pos_xy_pi_controller(self, robot_state_data, Kp=1.0, Ki=0.5):
+        curr_time = time.time()
+
+        curr_base_pos_xy = robot_state_data[:, :2]
+        self.logger.debug(f"Current base pos xy: {curr_base_pos_xy}")
+        pos_err = self.base_pos_command[:, :2] - curr_base_pos_xy
+
+        if not hasattr(self, "last_base_pos_xy"):
+            self.last_time = curr_time
+            self.integral_error = np.zeros_like(self.lin_vel_command[:, :2])
+
+        dt = curr_time - self.last_time
+        self.integral_error += pos_err * dt
+        self.lin_vel_command[:, :2] = np.clip(
+            Kp * pos_err + Ki * self.integral_error, -1.0, 1.0
+        )
+
+        self.last_time = curr_time
+
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_buffer_dict = super().get_current_obs_buffer_dict(robot_state_data)
         current_obs_buffer_dict["actions"] = self.last_policy_action[
             :, : self.num_lower_dofs
         ]
+        self.base_pos_xy_pi_controller(robot_state_data)
         current_obs_buffer_dict["command_lin_vel"] = self.lin_vel_command
         current_obs_buffer_dict["command_ang_vel"] = self.ang_vel_command
         current_obs_buffer_dict["command_stand"] = self.stand_command
@@ -113,7 +133,7 @@ class DecLocomotionPolicy(BasePolicy):
             self.lin_vel_command[0, 1] = 0.0
             self.logger.info(colored("Stance command", "blue"))
         else:
-            self.base_height_command[0, 0] = self.desired_base_height
+            self.base_pos_command[0, 2] = self.desired_base_height
             self.logger.info(colored("Walk command", "blue"))
 
     def _handle_zero_velocity(self):

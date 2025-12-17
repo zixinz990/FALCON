@@ -42,28 +42,47 @@ class JointControlGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Base height control
+        # Base position control
         tk.Label(
             self.scrollable_frame,
-            text="--- Base Height Control ---",
+            text="--- Base Position Control ---",
             font=("Helvetica", 12, "bold"),
         ).pack(pady=10)
-        frame = tk.Frame(self.scrollable_frame)
-        frame.pack(fill="x", padx=10, pady=2)
-        tk.Label(frame, text="Base Height", width=25, anchor="w").pack(side="left")
 
-        slider = tk.Scale(
-            frame,
-            from_=-0.5,
-            to=1.0,
-            resolution=0.01,
-            orient="horizontal",
-            length=250,
-            command=self.update_base_height,
-        )
+        base_pos_labels = ["Base Position X", "Base Position Y", "Base Position Z"]
+        self.base_pos_sliders = []
+        for i in range(3):
+            frame = tk.Frame(self.scrollable_frame)
+            frame.pack(fill="x", padx=10, pady=2)
+            tk.Label(frame, text=base_pos_labels[i], width=25, anchor="w").pack(
+                side="left"
+            )
 
-        slider.set(self.policy.base_height_command[0, 0])
-        slider.pack(side="right")
+            if i < 2:
+                slider = tk.Scale(
+                    frame,
+                    from_=-2.0,
+                    to=2.0,
+                    resolution=0.01,
+                    orient="horizontal",
+                    length=250,
+                    command=partial(self.update_base_pos, i),
+                )
+            else:
+                slider = tk.Scale(
+                    frame,
+                    from_=0.5,
+                    to=1.0,
+                    resolution=0.01,
+                    orient="horizontal",
+                    length=250,
+                    command=partial(self.update_base_pos, i),
+                )
+
+            # slider.set(self.policy.base_height_command[0, 0])
+            slider.set(self.policy.base_pos_command[0, i])
+            slider.pack(side="right")
+            self.base_pos_sliders.append(slider)
 
         # Waist control
         tk.Label(
@@ -149,9 +168,9 @@ class JointControlGUI:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def update_base_height(self, value):
-        # Update the base height command in the policy
-        self.policy.base_height_command[0, 0] = float(value)
+    def update_base_pos(self, index, value):
+        # Update the base position command in the policy
+        self.policy.base_pos_command[0, index] = float(value)
 
     def update_waist(self, index, value):
         # Update the waist command in the policy
@@ -204,7 +223,9 @@ class LocoManipPolicy(DecLocomotionPolicy):
     def get_current_obs_buffer_dict(self, robot_state_data):
         current_obs_dict = super().get_current_obs_buffer_dict(robot_state_data)
         current_obs_dict["actions"] = self.last_policy_action
-        current_obs_dict["command_base_height"] = self.base_height_command
+        current_obs_dict["command_base_height"] = np.array(
+            [[self.base_pos_command[0, 2]]]
+        )
 
         return current_obs_dict
 
@@ -488,16 +509,16 @@ class LocoManipPolicy(DecLocomotionPolicy):
     def _handle_base_height_control(self, keycode):
         """Handle base height control."""
         if keycode == "1":
-            self.base_height_command[0, 0] += 0.1
+            self.base_pos_command[0, 2] += 0.1
         elif keycode == "2":
-            self.base_height_command[0, 0] -= 0.1
+            self.base_pos_command[0, 2] -= 0.1
 
     def _handle_joystick_base_height_control(self, cur_key):
         """Handle joystick base height control."""
         if cur_key == "B+up":
-            self.base_height_command[0, 0] += 0.1
+            self.base_pos_command[0, 2] += 0.1
         elif cur_key == "B+down":
-            self.base_height_command[0, 0] -= 0.1
+            self.base_pos_command[0, 2] -= 0.1
 
     def _print_control_status(self):
         """Print current control status."""
