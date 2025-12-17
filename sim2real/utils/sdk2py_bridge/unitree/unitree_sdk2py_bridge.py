@@ -10,6 +10,10 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
         from unitree_sdk2py.core.channel import ChannelPublisher, ChannelSubscriber
         from unitree_sdk2py.idl.default import unitree_go_msg_dds__WirelessController_
         from unitree_sdk2py.idl.unitree_go.msg.dds_ import WirelessController_
+        from unitree_sdk2py.idl.default import (
+            unitree_go_msg_dds__SportModeState_ as OdomState_default,
+        )
+        from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_ as OdomState_
 
         robot_type = self.robot.ROBOT_TYPE
 
@@ -44,6 +48,10 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
         self.low_cmd_suber = ChannelSubscriber("rt/lowcmd", LowCmd_)
         self.low_cmd_suber.Init(self.LowCmdHandler, 1)
 
+        self.odom_state = OdomState_default()
+        self.odom_puber = ChannelPublisher("rt/odommodestate", OdomState_)
+        self.odom_puber.Init()
+
         # Initialize crc
         self.crc = CRC()
 
@@ -60,7 +68,7 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
             self.low_cmd = msg
 
     def PublishLowState(self):
-        """Publish Unitree low-level state."""
+        """Publish Unitree low-level state using MuJoCo data. Won't do anything if sim2real."""
         if self.mj_data is None:
             return
 
@@ -110,3 +118,15 @@ class UnitreeSdk2Bridge(BasicSdk2Bridge):
         self.low_state.tick = int(self.mj_data.time * 1e3)
         self.low_state.crc = self.crc.Crc(self.low_state)
         self.low_state_puber.Write(self.low_state)
+
+    def PublishOdometry(self):
+        """Publish Unitree odometry using MuJoCo data. Won't do anything if sim2real."""
+        if self.mj_data is None:
+            return
+
+        qpos = self.mj_data.qpos
+        qvel = self.mj_data.qvel
+
+        self.odom_state.position[:] = qpos[:3]
+        self.odom_state.velocity[:] = qvel[:3]
+        self.odom_puber.Write(self.odom_state)

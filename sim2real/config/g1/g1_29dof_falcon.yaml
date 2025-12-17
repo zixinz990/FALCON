@@ -11,7 +11,10 @@ MOTOR_TYPE: "serial" # Motor type, "serial" or "parallel"
 
 ## SIM
 DOMAIN_ID: 0 # Domain id
-INTERFACE: "lo" # in simulation, lo0 for mac, lo for linux
+# IP Interface 
+# For sim2sim, 'lo' is for linux and 'lo0' is for mac.
+# For sim2real, this needs to be specified according to your host ip, e.g., 'en0'
+INTERFACE: "lo"
 
 FREE_BASE: True
 

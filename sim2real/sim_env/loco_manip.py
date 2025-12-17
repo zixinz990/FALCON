@@ -37,6 +37,7 @@ class LocoManipSimulator(BaseSimulator):
 
     def sim_step(self):
         self.robot_bridge.PublishLowState()
+        self.robot_bridge.PublishOdometry()
         if self.robot_bridge.joystick:
             self.robot_bridge.PublishWirelessController()
         if self.config["ENABLE_ELASTIC_BAND"]:
