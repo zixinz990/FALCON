@@ -42,6 +42,29 @@ class JointControlGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        # Base height control
+        tk.Label(
+            self.scrollable_frame,
+            text="--- Base Height Control ---",
+            font=("Helvetica", 12, "bold"),
+        ).pack(pady=10)
+        frame = tk.Frame(self.scrollable_frame)
+        frame.pack(fill="x", padx=10, pady=2)
+        tk.Label(frame, text="Base Height", width=25, anchor="w").pack(side="left")
+
+        slider = tk.Scale(
+            frame,
+            from_=-0.5,
+            to=1.0,
+            resolution=0.01,
+            orient="horizontal",
+            length=250,
+            command=self.update_base_height,
+        )
+
+        slider.set(self.policy.base_height_command[0, 0])
+        slider.pack(side="right")
+
         # Waist control
         tk.Label(
             self.scrollable_frame,
@@ -49,7 +72,6 @@ class JointControlGUI:
             font=("Helvetica", 12, "bold"),
         ).pack(pady=10)
 
-        # Create 3 sliders for the 3 waist DOFs
         waist_labels = ["Waist Yaw", "Waist Roll", "Waist Pitch"]
         self.waist_sliders = []
         for i in range(3):
@@ -59,7 +81,6 @@ class JointControlGUI:
                 side="left"
             )
 
-            # Range: +/- 1.5 radians (~85 degrees)
             slider = tk.Scale(
                 frame,
                 from_=-1.5,
@@ -69,12 +90,18 @@ class JointControlGUI:
                 length=250,
                 command=partial(self.update_waist, i),
             )
-            # Set initial value from policy
+
             slider.set(self.policy.waist_dofs_command[0, i])
             slider.pack(side="right")
             self.waist_sliders.append(slider)
 
         # Upper body control
+        tk.Label(
+            self.scrollable_frame,
+            text="--- Upper Body Control ---",
+            font=("Helvetica", 12, "bold"),
+        ).pack(pady=10)
+
         upper_body_labels = [
             "Left Shoulder Pitch",
             "Left Shoulder Roll",
@@ -91,14 +118,7 @@ class JointControlGUI:
             "Right Wrist Pitch",
             "Right Wrist Yaw",
         ]
-        tk.Label(
-            self.scrollable_frame,
-            text="--- Upper Body Control ---",
-            font=("Helvetica", 12, "bold"),
-        ).pack(pady=10)
-
         self.upper_sliders = []
-        # Create a slider for each upper body joint
         for i in range(self.policy.num_upper_dofs):
             frame = tk.Frame(self.scrollable_frame)
             frame.pack(fill="x", padx=10, pady=2)
@@ -106,7 +126,6 @@ class JointControlGUI:
                 side="left"
             )
 
-            # Range: +/- 2.5 radians (~140 degrees) - adjusted for wider arm range
             slider = tk.Scale(
                 frame,
                 from_=-2.5,
@@ -117,7 +136,6 @@ class JointControlGUI:
                 command=partial(self.update_upper, i),
             )
 
-            # Set initial value from current policy state
             initial_val = self.policy.ref_upper_dof_pos[0, i]
             slider.set(initial_val)
             slider.pack(side="right")
@@ -130,6 +148,10 @@ class JointControlGUI:
         ).pack(pady=10)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def update_base_height(self, value):
+        # Update the base height command in the policy
+        self.policy.base_height_command[0, 0] = float(value)
 
     def update_waist(self, index, value):
         # Update the waist command in the policy
@@ -256,7 +278,6 @@ class LocoManipPolicy(DecLocomotionPolicy):
         robot_state_data = self.state_processor.robot_state_data
 
         # If playing loaded upper body traj
-        self.logger.info(f"Current ref upper dof pos: {self.ref_upper_dof_pos}")
         if self.play_loaded_upper_traj:
             if self.play_loaded_upper_traj_counter < len(joint_ref_traj):
                 self.ref_upper_dof_pos = joint_ref_traj[
