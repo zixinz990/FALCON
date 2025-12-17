@@ -9,6 +9,12 @@ class UnitreeStateProcessor(BasicStateProcessor):
         from unitree_sdk2py.core.channel import ChannelSubscriber
         from unitree_sdk2py.idl.unitree_go.msg.dds_ import LowState_ as LowState_go
         from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_ as LowState_hg
+        from unitree_sdk2py.idl.unitree_go.msg.dds_ import SportModeState_ as OdomState_
+
+        self.robot_odomstate_subscriber = ChannelSubscriber(
+            "rt/odommodestate", OdomState_
+        )
+        self.robot_odomstate_subscriber.Init(self.OdomStateHandler, 1)
 
         robot_type = self.config["ROBOT_TYPE"]
 
@@ -43,7 +49,7 @@ class UnitreeStateProcessor(BasicStateProcessor):
     def _extract_imu_data(self, imu_state):
         """Extract IMU data from Unitree state message."""
         # base quaternion
-        self.q[0:3] = 0.0  # base position (assumed to be at origin)
+        # self.q[0:3] = 0.0  # base position (assumed to be at origin)
         self.q[3:7] = imu_state.quaternion  # w, x, y, z
         self.dq[3:6] = imu_state.gyroscope
         self.ddq[0:3] = imu_state.accelerometer
@@ -55,6 +61,11 @@ class UnitreeStateProcessor(BasicStateProcessor):
             self.q[7 + i] = robot_joint_state[motor_idx].q
             self.dq[6 + i] = robot_joint_state[motor_idx].dq
             self.tau_est[6 + i] = robot_joint_state[motor_idx].tau_est
+
+    def OdomStateHandler(self, msg):
+        """Handle Unitree odometry state messages."""
+        self.q[0:3] = msg.position
+        self.robot_state_data = self._create_robot_state_data()
 
     def LowStateHandler_go(self, msg):
         """Handle Unitree GO low-level state messages."""
