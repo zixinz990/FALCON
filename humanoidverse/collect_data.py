@@ -81,6 +81,8 @@ def main(override_config: OmegaConf):
 
     pre_process_config(config)
     config.env.config.num_envs = 10
+    config.env.config.termination.terminate_when_motion_end = False
+    # TODO: Currently, the robot freezes after the reference motion ends. Maybe play another reference motion after that?
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
