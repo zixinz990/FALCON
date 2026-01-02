@@ -35,7 +35,7 @@ def main(override_config: OmegaConf):
 
     os.chdir(hydra.utils.get_original_cwd())
 
-    # 1. Load Checkpoint Config
+    # Load Checkpoint Config
     if override_config.checkpoint is None:
         logger.error("Please provide a checkpoint path via checkpoint=/path/to/ckpt.pt")
         return
@@ -53,14 +53,13 @@ def main(override_config: OmegaConf):
     with open(config_path) as file:
         train_config = OmegaConf.load(file)
 
-    # 2. Merge configs
+    # Merge configs
     # We merge override_config (CLI args) into train_config.
     # We do NOT merge train_config.eval_overrides (which usually sets num_envs=1)
     # because we want to keep training parallel configuration.
     config = OmegaConf.merge(train_config, override_config)
 
-    # 3. Enforce Requirements
-    # Requirement 1: Only IsaacGym
+    # Only IsaacGym
     simulator_type = config.simulator["_target_"].split(".")[-1]
     if simulator_type != "IsaacGym":
         logger.error(
@@ -68,7 +67,6 @@ def main(override_config: OmegaConf):
         )
         return
 
-    # Requirement 4: Open visualization (headless=False)
     config.headless = False
 
     # Import IsaacGym and Torch
@@ -82,10 +80,11 @@ def main(override_config: OmegaConf):
     logging.getLogger().addHandler(HydraLoggerBridge())
 
     pre_process_config(config)
+    config.env.config.num_envs = 10
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    # Requirement 3: Parallel simulation configuration same as training.
+    # Parallel simulation configuration same as training
     # This is handled by using `train_config` which contains `num_envs` from training.
     logger.info(f"Number of environments: {config.env.config.num_envs}")
 
@@ -96,11 +95,11 @@ def main(override_config: OmegaConf):
         checkpoint.parent / "renderings_data" / f"ckpt_{ckpt_num}"
     )
 
-    # 4. Instantiate Environment
+    # Instantiate Environment
     logger.info("Instantiating environment...")
     env = instantiate(config.env, device=device)
 
-    # 5. Instantiate Agent
+    # Instantiate Agent
     logger.info("Instantiating agent...")
     algo: BaseAlgo = instantiate(config.algo, env=env, device=device, log_dir=None)
     algo.setup()
@@ -108,27 +107,24 @@ def main(override_config: OmegaConf):
     # Load Checkpoint
     algo.load(config.checkpoint)
 
-    # Requirement 3: No exploration
-    # algo.actor.eval() sets the module to eval mode (affects dropout etc)
-    algo.actor.eval()
-    algo.critic.eval()
+    # No exploration
+    algo._eval_mode()
 
-    # 6. Data Collection Loop
+    # Data Collection Loop
     logger.info("Starting data collection...")
-
     obs_list = []
     actions_list = []
-
     obs_dict = env.reset_all()
 
-    # Requirement 3: Run one full iteration
-    # We interpret this as num_steps_per_env (size of rollout buffer)
-    num_steps = config.algo.num_steps_per_env
+    # Run one full iteration
+    num_steps = config.get("num_steps", 250)
     logger.info(f"Collecting data for {num_steps} steps...")
 
-    # Requirement 5: Record all observations and actions
+    from tqdm import tqdm
+
+    # Record all observations and actions
     with torch.inference_mode():
-        for step in range(num_steps):
+        for step in tqdm(range(num_steps), desc="Collecting Data"):
             # Collect current observation (before action)
             # Transfer to CPU/Numpy to save memory
             curr_obs = {k: v.cpu().numpy() for k, v in obs_dict.items()}
@@ -136,7 +132,10 @@ def main(override_config: OmegaConf):
 
             # Get Action (No exploration)
             # act_inference returns the mean of the distribution
-            actions = algo.actor.act_inference(obs_dict["actor_obs"])
+            if hasattr(algo, "act_inference"):
+                actions = algo.act_inference(obs_dict["actor_obs"])
+            else:
+                actions = algo.actor.act_inference(obs_dict["actor_obs"])
 
             # Store action
             curr_actions = actions.cpu().numpy()
@@ -146,12 +145,9 @@ def main(override_config: OmegaConf):
             actor_state = {"actions": actions}
             obs_dict, rewards, dones, infos = env.step(actor_state)
 
-            if (step + 1) % 100 == 0:
-                logger.info(f"Step {step + 1}/{num_steps}")
-
     logger.info("Data collection finished.")
 
-    # 7. Save to files
+    # Save to files
     output_dir = Path(HydraConfig.get().runtime.output_dir)
     obs_path = output_dir / "observations.npz"
     actions_path = output_dir / "actions.npy"
@@ -165,7 +161,11 @@ def main(override_config: OmegaConf):
 
     save_actions = np.array(actions_list)
 
-    logger.info(f"Saving observations to {obs_path} with shape (T, N, ...)")
+    logger.info(f"Saving observations to {obs_path}")
+    logger.info("Observation shapes:")
+    for k, v in save_obs.items():
+        logger.info(f"  {k}: {v.shape}")
+
     np.savez(obs_path, **save_obs)
 
     logger.info(f"Saving actions to {actions_path} with shape {save_actions.shape}")
