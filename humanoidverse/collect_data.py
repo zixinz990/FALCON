@@ -76,8 +76,8 @@ def configure_env_settings(config, checkpoint):
 
     pre_process_config(config)
 
-    config.headless = False
-    config.num_envs = 1980
+    config.headless = True
+    config.num_envs = config.get("data_collection_num_envs", 3960)
     config.env.config.locomotion_command_resampling_time = 4.0
     config.domain_rand.push_robots = True
 
@@ -107,19 +107,36 @@ def configure_env_settings(config, checkpoint):
     )
 
 
-def monkey_patch_reset(env):
+def monkey_patch_reset(env, device):
     """
     Patches the environment's reset callback to modify reset behavior.
     Ensures that only environments with failures are reset, while timeouts are handled separately.
+    Also tracks which environments have been reset due to failures.
     """
     original_reset_robot_states = env._reset_robot_states_callback
 
+    # Initialize reset flag buffer - True indicates the environment was reset due to failure
+    env.reset_flag = torch.zeros(env.num_envs, dtype=torch.bool, device=device)
+
     def custom_reset_robot_states(self, env_ids, target_states=None):
+        # Reset_flag is cleared at the start of each step in collect_data()
         is_timeout = self.time_out_buf[env_ids]
         failure_ids = env_ids[~is_timeout]
+        # is_timeout_ids = env_ids[is_timeout]
 
         if len(failure_ids) > 0:
             original_reset_robot_states(failure_ids, target_states)
+            logger.info(f"Reset {failure_ids.tolist()} due to failure")
+            self.reset_flag[failure_ids] = True
+
+        # if len(is_timeout_ids) > 0:
+        #     original_reset_robot_states(is_timeout_ids, target_states)
+        #     logger.info(f"Reset {is_timeout_ids.tolist()} due to timeout")
+        #     self.reset_flag[is_timeout_ids] = True
+
+        # original_reset_robot_states(env_ids, target_states)
+        # logger.info(f"Reset {env_ids.tolist()}")
+        # self.reset_flag[env_ids] = True
 
     env._reset_robot_states_callback = types.MethodType(custom_reset_robot_states, env)
 
@@ -144,7 +161,7 @@ def initialize_motion_pool(env, config, device):
 
     env.motion_ids = torch.randint(0, motion_pool_size, (num_envs,), device=device)
     env.motion_len = env._motion_lib.get_motion_length(env.motion_ids)
-    logger.info(f"Initial motion assignments: {env.motion_ids.tolist()}")
+    # logger.info(f"Initial motion assignments: {env.motion_ids.tolist()}")
     return motion_pool_size
 
 
@@ -158,7 +175,7 @@ def setup_simulation(config, checkpoint, device):
     logger.info("Instantiating environment...")
     env = instantiate(config.env, device=device)
 
-    monkey_patch_reset(env)
+    monkey_patch_reset(env, device)
     motion_pool_size = initialize_motion_pool(env, config, device)
 
     logger.info("Instantiating agent...")
@@ -198,6 +215,7 @@ def collect_data(env, algo, config, motion_pool_size, device):
     """
     Runs the main data collection loop.
     Iterates through steps, collects observations and actions, steps the environment, and handles timeouts.
+    Also tracks reset flags indicating which environments were reset due to failures.
     """
     num_steps = config.get("num_steps", 500)
     num_envs = config.env.config.num_envs
@@ -207,10 +225,15 @@ def collect_data(env, algo, config, motion_pool_size, device):
 
     obs_list = []
     actions_list = []
+    reset_flags_list = []
     obs_dict = env.reset_all()
 
     with torch.inference_mode():
         for step in tqdm(range(num_steps), desc="Collecting Data"):
+            # Clear reset_flag at the START of each step
+            # Ensures reset_flag is True only for envs reset during THIS step
+            env.reset_flag[:] = False
+
             curr_obs = {k: v.cpu().numpy() for k, v in obs_dict.items()}
             obs_list.append(curr_obs)
 
@@ -226,16 +249,21 @@ def collect_data(env, algo, config, motion_pool_size, device):
 
             handle_timeouts(env, infos, motion_pool_size, step, device)
 
-    return obs_list, actions_list
+            # Collect reset flags after step (indicates if env was reset due to failure)
+            reset_flags_list.append(env.reset_flag.cpu().numpy().copy())
+
+    return obs_list, actions_list, reset_flags_list
 
 
-def save_results(obs_list, actions_list, output_dir):
+def save_results(obs_list, actions_list, reset_flags_list, output_dir):
     """
-    Saves the collected observations and actions to disk in .npz and .npy formats respectively.
+    Saves the collected observations, actions, and reset flags to disk.
     Reorganizes observations from list of dicts to dict of arrays.
+    Reset flags indicate which environments were reset due to failures (discontinuous data).
     """
     obs_path = output_dir / "observations.npz"
     actions_path = output_dir / "actions.npy"
+    reset_flags_path = output_dir / "reset_flags.npy"
 
     save_obs = {}
     keys = obs_list[0].keys()
@@ -250,6 +278,14 @@ def save_results(obs_list, actions_list, output_dir):
     save_actions = np.array(actions_list)
     logger.info(f"Saving actions to {actions_path} with shape {save_actions.shape}")
     np.save(actions_path, save_actions)
+
+    save_reset_flags = np.array(reset_flags_list)
+    logger.info(
+        f"Saving reset flags to {reset_flags_path} with shape {save_reset_flags.shape}"
+    )
+    logger.info(f"  Total resets due to failures: {save_reset_flags.sum()}")
+    # logger.info(f"  Total resets due to timeouts: {save_reset_flags.sum()}")
+    np.save(reset_flags_path, save_reset_flags)
 
 
 @hydra.main(config_path="config", config_name="base_eval", version_base="1.1")
@@ -269,9 +305,11 @@ def main(override_config: OmegaConf):
 
     env, algo, motion_pool_size = setup_simulation(config, checkpoint, device)
 
-    obs_list, actions_list = collect_data(env, algo, config, motion_pool_size, device)
+    obs_list, actions_list, reset_flags_list = collect_data(
+        env, algo, config, motion_pool_size, device
+    )
 
-    save_results(obs_list, actions_list, output_dir)
+    save_results(obs_list, actions_list, reset_flags_list, output_dir)
 
     logger.info("Done.")
 
