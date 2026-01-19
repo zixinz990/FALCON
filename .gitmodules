@@ -1,3 +1,6 @@
 [submodule "humanoid_linear_distill"]
 	path = humanoid_linear_distill
 	url = https://github.com/zixinz990/humanoid-linear-distill.git
+[submodule "linear-dpg"]
+	path = linear-dpg
+	url = https://github.com/zixinz990/linear-dpg.git
