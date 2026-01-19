@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+import h5py
 import isaacgym
 from isaacgym import gymapi, gymutil
 import torch
@@ -84,7 +85,7 @@ def configure_env_settings(config, checkpoint):
         sys.exit(1)
 
     pre_process_config(config)
-    config.headless = False
+    config.headless = True
 
     # Ensure even number for paired comparison
     num_envs = config.get("data_collection_num_envs", 3960)
@@ -404,10 +405,22 @@ def collect_data(env, algo, phi_nn, K_nn, config, motion_pool_size, device):
     logger.info("  ORANGE marker: Distilled policy (odd indices)")
 
     obs_list = []
+    commands_list = []
+    base_height_list = []
+    base_position_list = []
+    base_orientation_list = []
+    hand_positions_list = []
+    hand_velocities_list = []
+    actions_all_list = []
     actions_original_list = []
     actions_distilled_list = []
     reset_flags_list = []
     completed_episodes = []
+
+    # Get hand link indices
+    left_hand_idx = env.body_names.index("left_rubber_hand")
+    right_hand_idx = env.body_names.index("right_rubber_hand")
+    logger.info(f"Hand link indices - Left: {left_hand_idx}, Right: {right_hand_idx}")
 
     # Per-pair accumulators
     current_episode_rewards_original = torch.zeros(num_pairs, device=device)
@@ -430,6 +443,9 @@ def collect_data(env, algo, phi_nn, K_nn, config, motion_pool_size, device):
             curr_obs = {k: v.cpu().numpy() for k, v in obs_dict.items()}
             obs_list.append(curr_obs)
 
+            # Record commands for all robots
+            commands_list.append(env.commands.cpu().numpy().copy())
+
             actor_obs = obs_dict["actor_obs"]
             actions = torch.zeros(num_envs, env.config.robot.actions_dim, device=device)
 
@@ -449,9 +465,42 @@ def collect_data(env, algo, phi_nn, K_nn, config, motion_pool_size, device):
 
             actions_original_list.append(actions[even_indices].cpu().numpy())
             actions_distilled_list.append(actions[odd_indices].cpu().numpy())
+            actions_all_list.append(actions.cpu().numpy().copy())
 
             actor_state = {"actions": actions}
             obs_dict, rewards, dones, infos = env.step(actor_state)
+
+            # Record base pose (position and orientation) after physics step
+            base_height_list.append(
+                env.simulator.robot_root_states[:, 2].cpu().numpy().copy()
+            )
+            base_position_list.append(
+                env.simulator.robot_root_states[:, 0:3].cpu().numpy().copy()
+            )
+            base_orientation_list.append(
+                env.simulator.robot_root_states[:, 3:7].cpu().numpy().copy()
+            )
+
+            # Record hand positions and velocities
+            left_hand_pos = (
+                env.simulator._rigid_body_pos[:, left_hand_idx, :].cpu().numpy()
+            )
+            right_hand_pos = (
+                env.simulator._rigid_body_pos[:, right_hand_idx, :].cpu().numpy()
+            )
+            hand_positions_list.append(
+                np.stack([left_hand_pos, right_hand_pos], axis=1).copy()
+            )  # (num_envs, 2, 3)
+
+            left_hand_vel = (
+                env.simulator._rigid_body_vel[:, left_hand_idx, :].cpu().numpy()
+            )
+            right_hand_vel = (
+                env.simulator._rigid_body_vel[:, right_hand_idx, :].cpu().numpy()
+            )
+            hand_velocities_list.append(
+                np.stack([left_hand_vel, right_hand_vel], axis=1).copy()
+            )  # (num_envs, 2, 3)
 
             # Accumulate rewards per pair
             if isinstance(rewards, dict):
@@ -512,6 +561,13 @@ def collect_data(env, algo, phi_nn, K_nn, config, motion_pool_size, device):
 
     return (
         obs_list,
+        commands_list,
+        base_height_list,
+        base_position_list,
+        base_orientation_list,
+        hand_positions_list,
+        hand_velocities_list,
+        actions_all_list,
         actions_original_list,
         actions_distilled_list,
         reset_flags_list,
@@ -648,6 +704,117 @@ def save_results(
     np.save(reset_flags_path, save_reset_flags)
 
 
+def save_results_h5(
+    obs_list,
+    commands_list,
+    base_height_list,
+    base_position_list,
+    base_orientation_list,
+    hand_positions_list,
+    hand_velocities_list,
+    actions_all_list,
+    actions_original_list,
+    actions_distilled_list,
+    reset_flags_list,
+    output_dir,
+    config,
+):
+    """Save all experiment data (commands, observations, actions) to HDF5 format."""
+    h5_path = output_dir / "experiment_data.h5"
+    logger.info(f"Saving experiment data to HDF5: {h5_path}")
+
+    # Convert lists to numpy arrays
+    commands_array = np.array(commands_list)
+    base_height_array = np.array(base_height_list)
+    base_position_array = np.array(base_position_list)
+    base_orientation_array = np.array(base_orientation_list)
+    hand_positions_array = np.array(hand_positions_list)
+    hand_velocities_array = np.array(hand_velocities_list)
+    actions_all_array = np.array(actions_all_list)
+    actions_original_array = np.array(actions_original_list)
+    actions_distilled_array = np.array(actions_distilled_list)
+    reset_flags_array = np.array(reset_flags_list)
+
+    # Process observations
+    obs_arrays = {}
+    obs_keys = obs_list[0].keys()
+    for k in obs_keys:
+        obs_arrays[k] = np.array([x[k] for x in obs_list])
+
+    # Extract metadata
+    num_steps = len(obs_list)
+    num_envs = commands_array.shape[1] if len(commands_array.shape) > 1 else 0
+    num_pairs = num_envs // 2
+    dt = config.get("dt", 0.02)
+
+    with h5py.File(h5_path, "w") as f:
+        # Metadata group
+        metadata = f.create_group("metadata")
+        metadata.attrs["num_envs"] = num_envs
+        metadata.attrs["num_steps"] = num_steps
+        metadata.attrs["num_pairs"] = num_pairs
+        metadata.attrs["dt"] = dt
+
+        # Commands dataset: (num_steps, num_envs, cmd_dim)
+        f.create_dataset("commands", data=commands_array, compression="gzip")
+        logger.info(f"  commands: {commands_array.shape}")
+
+        # Base height dataset: (num_steps, num_envs)
+        f.create_dataset("base_height", data=base_height_array, compression="gzip")
+        logger.info(f"  base_height: {base_height_array.shape}")
+
+        # Base pose group: position (XYZ) and orientation (quaternion xyzw)
+        base_pose_group = f.create_group("base_pose")
+        base_pose_group.create_dataset(
+            "position", data=base_position_array, compression="gzip"
+        )
+        base_pose_group.create_dataset(
+            "orientation", data=base_orientation_array, compression="gzip"
+        )
+        logger.info(f"  base_pose/position: {base_position_array.shape}")
+        logger.info(f"  base_pose/orientation: {base_orientation_array.shape}")
+
+        # Hand tracking group
+        hand_group = f.create_group("hand_tracking")
+        hand_group.create_dataset(
+            "positions", data=hand_positions_array, compression="gzip"
+        )
+        hand_group.create_dataset(
+            "velocities", data=hand_velocities_array, compression="gzip"
+        )
+        logger.info(f"  hand_tracking/positions: {hand_positions_array.shape}")
+        logger.info(f"  hand_tracking/velocities: {hand_velocities_array.shape}")
+
+        # Observations group
+        obs_group = f.create_group("observations")
+        for k, v in obs_arrays.items():
+            obs_group.create_dataset(k, data=v, compression="gzip")
+            logger.info(f"  observations/{k}: {v.shape}")
+
+        # Actions group
+        actions_group = f.create_group("actions")
+        actions_group.create_dataset("all", data=actions_all_array, compression="gzip")
+        actions_group.create_dataset(
+            "original", data=actions_original_array, compression="gzip"
+        )
+        actions_group.create_dataset(
+            "distilled", data=actions_distilled_array, compression="gzip"
+        )
+        logger.info(f"  actions/all: {actions_all_array.shape}")
+        logger.info(f"  actions/original: {actions_original_array.shape}")
+        logger.info(f"  actions/distilled: {actions_distilled_array.shape}")
+
+        # Episode info group
+        episode_group = f.create_group("episode_info")
+        episode_group.create_dataset(
+            "reset_flags", data=reset_flags_array, compression="gzip"
+        )
+        logger.info(f"  episode_info/reset_flags: {reset_flags_array.shape}")
+
+    logger.info(f"HDF5 file saved successfully: {h5_path}")
+    return h5_path
+
+
 def create_output_dir():
     """Create timestamped output directory."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -682,6 +849,13 @@ def main(override_config: OmegaConf):
 
     (
         obs_list,
+        commands_list,
+        base_height_list,
+        base_position_list,
+        base_orientation_list,
+        hand_positions_list,
+        hand_velocities_list,
+        actions_all_list,
         actions_original_list,
         actions_distilled_list,
         reset_flags_list,
@@ -695,7 +869,25 @@ def main(override_config: OmegaConf):
         reset_flags_list,
         output_dir,
     )
-    print_reward_summary(completed_episodes, output_dir)
+
+    # Save all data to HDF5 format
+    save_results_h5(
+        obs_list,
+        commands_list,
+        base_height_list,
+        base_position_list,
+        base_orientation_list,
+        hand_positions_list,
+        hand_velocities_list,
+        actions_all_list,
+        actions_original_list,
+        actions_distilled_list,
+        reset_flags_list,
+        output_dir,
+        config,
+    )
+
+    # print_reward_summary(completed_episodes, output_dir)
 
     logger.info("=" * 60)
     logger.info("  EVALUATION COMPLETE")
