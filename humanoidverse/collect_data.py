@@ -310,17 +310,17 @@ def collect_data(env, algo, config, motion_pool_size, body_idx, device):
             actor_obs = obs_dict["actor_obs"]  # (num_envs, 575)
 
             # Overwrite shared fields with actor_obs (last frame) values
-            critic_obs[:, 0:29] = actor_obs[:, 460:489]      # actions
-            critic_obs[:, 29:32] = actor_obs[:, 489:492]      # base_ang_vel
-            critic_obs[:, 39:40] = actor_obs[:, 492:493]      # command_ang_vel
-            critic_obs[:, 40:41] = actor_obs[:, 493:494]      # command_base_height
-            critic_obs[:, 41:43] = actor_obs[:, 494:496]      # command_lin_vel
-            critic_obs[:, 43:44] = actor_obs[:, 496:497]      # command_stand
-            critic_obs[:, 44:47] = actor_obs[:, 497:500]      # command_waist_dofs
-            critic_obs[:, 47:76] = actor_obs[:, 500:529]      # dof_pos
-            critic_obs[:, 76:105] = actor_obs[:, 529:558]     # dof_vel
-            critic_obs[:, 108:111] = actor_obs[:, 558:561]    # projected_gravity
-            critic_obs[:, 111:125] = actor_obs[:, 561:575]    # ref_upper_dof_pos
+            critic_obs[:, 0:29] = actor_obs[:, 460:489]  # actions
+            critic_obs[:, 29:32] = actor_obs[:, 489:492]  # base_ang_vel
+            critic_obs[:, 39:40] = actor_obs[:, 492:493]  # command_ang_vel
+            critic_obs[:, 40:41] = actor_obs[:, 493:494]  # command_base_height
+            critic_obs[:, 41:43] = actor_obs[:, 494:496]  # command_lin_vel
+            critic_obs[:, 43:44] = actor_obs[:, 496:497]  # command_stand
+            critic_obs[:, 44:47] = actor_obs[:, 497:500]  # command_waist_dofs
+            critic_obs[:, 47:76] = actor_obs[:, 500:529]  # dof_pos
+            critic_obs[:, 76:105] = actor_obs[:, 529:558]  # dof_vel
+            critic_obs[:, 108:111] = actor_obs[:, 558:561]  # projected_gravity
+            critic_obs[:, 111:125] = actor_obs[:, 561:575]  # ref_upper_dof_pos
             # Critic-only fields kept: base_lin_vel[32:35], base_orientation[35:39],
             #   left_ee_force[105:108], right_ee_force[125:128]
 
