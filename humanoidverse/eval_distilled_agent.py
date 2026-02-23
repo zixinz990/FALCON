@@ -320,7 +320,7 @@ def load_distilled_policy(config, device):
     phi_nn = ObsNet(
         input_size=actor_obs_dim, hidden_size=hidden_size, output_size=feature_dim
     ).to(device)
-    K_nn = KNet(input_size=feature_dim, output_size=action_dim).to(device)
+    K_nn = KNet(input_size=feature_dim, output_size=action_dim, bias=False).to(device)
 
     phi_path = distilled_model_dir / "phi_nn.pth"
     K_path = distilled_model_dir / "K_nn.pth"
@@ -339,13 +339,15 @@ def load_distilled_policy(config, device):
     # Extract K matrix and bias from the single linear layer of K_nn
     # K_nn(z) = K_matrix @ z + b_vector
     K_matrix = K_nn.linear1.weight.data.clone()  # (action_dim, feature_dim)
-    b_vector = K_nn.linear1.bias.data.clone()  # (action_dim,)
-    logger.info(
-        f"Extracted K matrix {tuple(K_matrix.shape)} and b vector {tuple(b_vector.shape)} from K_nn"
-    )
+    # b_vector = K_nn.linear1.bias.data.clone()  # (action_dim,)
+    # logger.info(
+    #     f"Extracted K matrix {tuple(K_matrix.shape)} and b vector {tuple(b_vector.shape)} from K_nn"
+    # )
+    logger.info(f"Extracted K matrix {tuple(K_matrix.shape)} from K_nn")
 
     logger.info("Distilled policy loaded successfully.")
-    return phi_nn, K_nn, K_matrix, b_vector
+    # return phi_nn, K_nn, K_matrix, b_vector
+    return phi_nn, K_nn, K_matrix
 
 
 def load_original_policy(config, env, device):
@@ -371,9 +373,11 @@ def setup_simulation(config, checkpoint, device):
 
     logger.info("Loading policies...")
     algo = load_original_policy(config, env, device)
-    phi_nn, K_nn, K_matrix, b_vector = load_distilled_policy(config, device)
+    # phi_nn, K_nn, K_matrix, b_vector = load_distilled_policy(config, device)
+    phi_nn, K_nn, K_matrix = load_distilled_policy(config, device)
 
-    return env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size
+    # return env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size
+    return env, algo, phi_nn, K_nn, K_matrix, motion_pool_size
 
 
 def handle_timeouts(env, infos, motion_pool_size, step, device):
@@ -443,9 +447,10 @@ def draw_policy_markers(env):
         )
 
 
-def collect_data(
-    env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
-):
+# def collect_data(
+#     env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
+# ):
+def collect_data(env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, device):
     """Run simulation with three policies per triplet. Track rewards for all three."""
     num_steps = config.get("num_steps", 500)
     num_envs = config.env.config.num_envs
@@ -522,7 +527,8 @@ def collect_data(
             # Matrix K policy for i%3==2: u = K @ phi_nn(x) + b
             mat_indices = torch.arange(2, num_envs, 3, device=device)
             phi_x_mat = phi_nn(actor_obs[mat_indices])
-            actions[mat_indices] = phi_x_mat @ K_matrix.T + b_vector
+            # actions[mat_indices] = phi_x_mat @ K_matrix.T + b_vector
+            actions[mat_indices] = phi_x_mat @ K_matrix.T
 
             actions_original_list.append(actions[orig_indices].cpu().numpy())
             actions_distilled_list.append(actions[dist_nn_indices].cpu().numpy())
@@ -596,9 +602,7 @@ def collect_data(
                 completed_episodes.append(
                     {
                         "motion_id": current_motion_ids[tid].item(),
-                        "original_reward": current_episode_rewards_original[
-                            tid
-                        ].item(),
+                        "original_reward": current_episode_rewards_original[tid].item(),
                         "distilled_reward": current_episode_rewards_distilled[
                             tid
                         ].item(),
@@ -683,7 +687,11 @@ def print_reward_summary(completed_episodes, output_dir):
 
         best = max(orig_reward, dist_reward, mat_reward)
         num_best = [orig_reward, dist_reward, mat_reward].count(best)
-        if num_best > 1 and abs(orig_reward - dist_reward) < 1e-6 and abs(orig_reward - mat_reward) < 1e-6:
+        if (
+            num_best > 1
+            and abs(orig_reward - dist_reward) < 1e-6
+            and abs(orig_reward - mat_reward) < 1e-6
+        ):
             winner = "TIE"
             ties += 1
         elif orig_reward == best:
@@ -723,9 +731,13 @@ def print_reward_summary(completed_episodes, output_dir):
         d = abs(ep["distilled_reward"] - ep["matrix_reward"])
         if d > max_diff_dm:
             max_diff_dm = d
-    logger.info(f"Max absolute reward difference (Distilled - Matrix): {max_diff_dm:.6f}")
+    logger.info(
+        f"Max absolute reward difference (Distilled - Matrix): {max_diff_dm:.6f}"
+    )
     if max_diff_dm < 1e-3:
-        logger.info("Distilled NN and Matrix K policies produce nearly identical rewards (as expected).")
+        logger.info(
+            "Distilled NN and Matrix K policies produce nearly identical rewards (as expected)."
+        )
     logger.info("")
 
     if total_steps > 0:
@@ -948,10 +960,30 @@ def main(override_config: OmegaConf):
         OmegaConf.save(config, f)
     logger.info(f"Config saved to: {config_save_path}")
 
-    env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size = setup_simulation(
+    # env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size = setup_simulation(
+    #     config, checkpoint, device
+    # )
+    env, algo, phi_nn, K_nn, K_matrix, motion_pool_size = setup_simulation(
         config, checkpoint, device
     )
 
+    # (
+    #     obs_list,
+    #     commands_list,
+    #     base_height_list,
+    #     base_position_list,
+    #     base_orientation_list,
+    #     hand_positions_list,
+    #     hand_velocities_list,
+    #     actions_all_list,
+    #     actions_original_list,
+    #     actions_distilled_list,
+    #     actions_matrix_list,
+    #     reset_flags_list,
+    #     completed_episodes,
+    # ) = collect_data(
+    #     env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
+    # )
     (
         obs_list,
         commands_list,
@@ -967,7 +999,7 @@ def main(override_config: OmegaConf):
         reset_flags_list,
         completed_episodes,
     ) = collect_data(
-        env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
+        env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, device
     )
 
     save_results(
