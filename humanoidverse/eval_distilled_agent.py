@@ -306,7 +306,7 @@ def load_distilled_policy(config, device):
     distilled_model_dir = Path(config.distilled_model_dir)
     feature_dim = config.get("feature_dim", 1024)
     hidden_size = config.get("hidden_size", 2048)
-    actor_obs_dim = config.get("actor_obs_dim", 575)
+    actor_obs_dim = config.get("actor_obs_dim", 206)
     action_dim = config.get("action_dim", 29)
 
     logger.info(f"Loading distilled policy from: {distilled_model_dir}")
@@ -361,11 +361,57 @@ def load_original_policy(config, env, device):
     return algo
 
 
+def extract_extended_state(env, body_idx):
+    """Extract 78-dim extended rigid body state from simulator.
+
+    Layout: base_height(1), torques(29), left_foot_pos(3), right_foot_pos(3),
+            left_foot_rot(4), right_foot_rot(4), left_foot_contact_z(1),
+            right_foot_contact_z(1), left_foot_vel(3), right_foot_vel(3),
+            torso_rot(4), torso_ang_vel(3), pelvis_pos(3), pelvis_rot(4),
+            left_hand_vel(3), right_hand_vel(3), left_hand_ang_vel(3),
+            right_hand_ang_vel(3)
+    """
+    sim = env.simulator
+    return torch.cat(
+        [
+            sim.robot_root_states[:, 2:3],
+            env.torques,
+            sim._rigid_body_pos[:, body_idx["left_foot"], :],
+            sim._rigid_body_pos[:, body_idx["right_foot"], :],
+            sim._rigid_body_rot[:, body_idx["left_foot"], :],
+            sim._rigid_body_rot[:, body_idx["right_foot"], :],
+            sim.contact_forces[:, body_idx["left_foot"], 2:3],
+            sim.contact_forces[:, body_idx["right_foot"], 2:3],
+            sim._rigid_body_vel[:, body_idx["left_foot"], :],
+            sim._rigid_body_vel[:, body_idx["right_foot"], :],
+            sim._rigid_body_rot[:, body_idx["torso"], :],
+            sim._rigid_body_ang_vel[:, body_idx["torso"], :],
+            sim.robot_root_states[:, 0:3],
+            sim.robot_root_states[:, 3:7],
+            sim._rigid_body_vel[:, body_idx["left_hand"], :],
+            sim._rigid_body_vel[:, body_idx["right_hand"], :],
+            sim._rigid_body_ang_vel[:, body_idx["left_hand"], :],
+            sim._rigid_body_ang_vel[:, body_idx["right_hand"], :],
+        ],
+        dim=1,
+    )
+
+
 def setup_simulation(config, checkpoint, device):
     """Initialize env, arrange triplet positions, and load all three policies."""
     configure_env_settings(config, checkpoint)
     logger.info("Instantiating environment...")
     env = instantiate(config.env, device=device)
+
+    # Look up body indices for extended state extraction
+    body_idx = {
+        "left_foot": env.body_names.index("left_ankle_roll_link"),
+        "right_foot": env.body_names.index("right_ankle_roll_link"),
+        "torso": env.body_names.index("torso_link"),
+        "left_hand": env.body_names.index("left_rubber_hand"),
+        "right_hand": env.body_names.index("right_rubber_hand"),
+    }
+    logger.info(f"Body indices for extended state: {body_idx}")
 
     arrange_triplet_environments(env, config, device)
     monkey_patch_triplet_reset(env, device)
@@ -373,11 +419,9 @@ def setup_simulation(config, checkpoint, device):
 
     logger.info("Loading policies...")
     algo = load_original_policy(config, env, device)
-    # phi_nn, K_nn, K_matrix, b_vector = load_distilled_policy(config, device)
     phi_nn, K_nn, K_matrix = load_distilled_policy(config, device)
 
-    # return env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size
-    return env, algo, phi_nn, K_nn, K_matrix, motion_pool_size
+    return env, algo, phi_nn, K_nn, K_matrix, motion_pool_size, body_idx
 
 
 def handle_timeouts(env, infos, motion_pool_size, step, device):
@@ -450,7 +494,9 @@ def draw_policy_markers(env):
 # def collect_data(
 #     env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
 # ):
-def collect_data(env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, device):
+def collect_data(
+    env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, body_idx, device
+):
     """Run simulation with three policies per triplet. Track rewards for all three."""
     num_steps = config.get("num_steps", 500)
     num_envs = config.env.config.num_envs
@@ -510,7 +556,12 @@ def collect_data(env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, de
             actor_obs = obs_dict["actor_obs"]
             actions = torch.zeros(num_envs, env.config.robot.actions_dim, device=device)
 
-            # Original policy for i%3==0
+            # Construct 206-dim state for distilled policies: critic_obs (128) + extended (78)
+            critic_obs = obs_dict["critic_obs"]
+            extended_state = extract_extended_state(env, body_idx)
+            state_206 = torch.cat([critic_obs, extended_state], dim=1)
+
+            # Original policy for i%3==0 (uses 575-dim actor_obs)
             orig_indices = torch.arange(0, num_envs, 3, device=device)
             if hasattr(algo, "act_inference"):
                 actions[orig_indices] = algo.act_inference(actor_obs[orig_indices])
@@ -519,15 +570,14 @@ def collect_data(env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, de
                     actor_obs[orig_indices]
                 )
 
-            # Distilled NN policy for i%3==1: u = K_nn(phi_nn(x))
+            # Distilled NN policy for i%3==1: u = K_nn(phi_nn(state_206))
             dist_nn_indices = torch.arange(1, num_envs, 3, device=device)
-            phi_x_nn = phi_nn(actor_obs[dist_nn_indices])
+            phi_x_nn = phi_nn(state_206[dist_nn_indices])
             actions[dist_nn_indices] = K_nn(phi_x_nn)
 
-            # Matrix K policy for i%3==2: u = K @ phi_nn(x) + b
+            # Matrix K policy for i%3==2: u = K @ phi_nn(state_206)
             mat_indices = torch.arange(2, num_envs, 3, device=device)
-            phi_x_mat = phi_nn(actor_obs[mat_indices])
-            # actions[mat_indices] = phi_x_mat @ K_matrix.T + b_vector
+            phi_x_mat = phi_nn(state_206[mat_indices])
             actions[mat_indices] = phi_x_mat @ K_matrix.T
 
             actions_original_list.append(actions[orig_indices].cpu().numpy())
@@ -960,30 +1010,10 @@ def main(override_config: OmegaConf):
         OmegaConf.save(config, f)
     logger.info(f"Config saved to: {config_save_path}")
 
-    # env, algo, phi_nn, K_nn, K_matrix, b_vector, motion_pool_size = setup_simulation(
-    #     config, checkpoint, device
-    # )
-    env, algo, phi_nn, K_nn, K_matrix, motion_pool_size = setup_simulation(
+    env, algo, phi_nn, K_nn, K_matrix, motion_pool_size, body_idx = setup_simulation(
         config, checkpoint, device
     )
 
-    # (
-    #     obs_list,
-    #     commands_list,
-    #     base_height_list,
-    #     base_position_list,
-    #     base_orientation_list,
-    #     hand_positions_list,
-    #     hand_velocities_list,
-    #     actions_all_list,
-    #     actions_original_list,
-    #     actions_distilled_list,
-    #     actions_matrix_list,
-    #     reset_flags_list,
-    #     completed_episodes,
-    # ) = collect_data(
-    #     env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
-    # )
     (
         obs_list,
         commands_list,
@@ -999,7 +1029,7 @@ def main(override_config: OmegaConf):
         reset_flags_list,
         completed_episodes,
     ) = collect_data(
-        env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, device
+        env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, body_idx, device
     )
 
     save_results(
