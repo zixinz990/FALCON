@@ -11,7 +11,7 @@ K_nn.eval()
 
 # Extract K and b
 K = K_nn.linear1.weight.data.clone()  # (action_dim, feature_dim)
-b = K_nn.linear1.bias.data.clone()    # (action_dim,)
+b = K_nn.linear1.bias.data.clone()  # (action_dim,)
 
 # Test with random inputs
 torch.manual_seed(42)
