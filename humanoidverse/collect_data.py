@@ -165,6 +165,42 @@ def initialize_motion_pool(env, config, device):
     return motion_pool_size
 
 
+def extract_extended_state(env, body_idx):
+    """Extract 78-dim extended rigid body state from simulator.
+
+    Layout: base_height(1), torques(29), left_foot_pos(3), right_foot_pos(3),
+            left_foot_rot(4), right_foot_rot(4), left_foot_contact_z(1),
+            right_foot_contact_z(1), left_foot_vel(3), right_foot_vel(3),
+            torso_rot(4), torso_ang_vel(3), pelvis_pos(3), pelvis_rot(4),
+            left_hand_vel(3), right_hand_vel(3), left_hand_ang_vel(3),
+            right_hand_ang_vel(3)
+    """
+    sim = env.simulator
+    return torch.cat(
+        [
+            sim.robot_root_states[:, 2:3],
+            env.torques,
+            sim._rigid_body_pos[:, body_idx["left_foot"], :],
+            sim._rigid_body_pos[:, body_idx["right_foot"], :],
+            sim._rigid_body_rot[:, body_idx["left_foot"], :],
+            sim._rigid_body_rot[:, body_idx["right_foot"], :],
+            sim.contact_forces[:, body_idx["left_foot"], 2:3],
+            sim.contact_forces[:, body_idx["right_foot"], 2:3],
+            sim._rigid_body_vel[:, body_idx["left_foot"], :],
+            sim._rigid_body_vel[:, body_idx["right_foot"], :],
+            sim._rigid_body_rot[:, body_idx["torso"], :],
+            sim._rigid_body_ang_vel[:, body_idx["torso"], :],
+            sim.robot_root_states[:, 0:3],
+            sim.robot_root_states[:, 3:7],
+            sim._rigid_body_vel[:, body_idx["left_hand"], :],
+            sim._rigid_body_vel[:, body_idx["right_hand"], :],
+            sim._rigid_body_ang_vel[:, body_idx["left_hand"], :],
+            sim._rigid_body_ang_vel[:, body_idx["right_hand"], :],
+        ],
+        dim=1,
+    )
+
+
 def setup_simulation(config, checkpoint, device):
     """
     Sets up the entire simulation environment, including the environment instance, agent, and motion pool.
@@ -175,6 +211,16 @@ def setup_simulation(config, checkpoint, device):
     logger.info("Instantiating environment...")
     env = instantiate(config.env, device=device)
 
+    # Look up body indices for extended state extraction
+    body_idx = {
+        "left_foot": env.body_names.index("left_ankle_roll_link"),
+        "right_foot": env.body_names.index("right_ankle_roll_link"),
+        "torso": env.body_names.index("torso_link"),
+        "left_hand": env.body_names.index("left_rubber_hand"),
+        "right_hand": env.body_names.index("right_rubber_hand"),
+    }
+    logger.info(f"Body indices for extended state: {body_idx}")
+
     monkey_patch_reset(env, device)
     motion_pool_size = initialize_motion_pool(env, config, device)
 
@@ -184,7 +230,7 @@ def setup_simulation(config, checkpoint, device):
     algo.load(config.checkpoint)
     algo._eval_mode()
 
-    return env, algo, motion_pool_size
+    return env, algo, motion_pool_size, body_idx
 
 
 def handle_timeouts(env, infos, motion_pool_size, step, device):
@@ -211,11 +257,12 @@ def handle_timeouts(env, infos, motion_pool_size, step, device):
         # )
 
 
-def collect_data(env, algo, config, motion_pool_size, device):
+def collect_data(env, algo, config, motion_pool_size, body_idx, device):
     """
     Runs the main data collection loop.
     Iterates through steps, collects observations and actions, steps the environment, and handles timeouts.
     Also tracks reset flags indicating which environments were reset due to failures.
+    Additionally constructs 206-dim state vectors (critic_obs 128 + extended rigid body 78).
     """
     num_steps = config.get("num_steps", 500)
     num_envs = config.env.config.num_envs
@@ -225,6 +272,7 @@ def collect_data(env, algo, config, motion_pool_size, device):
 
     obs_list = []
     actions_list = []
+    state_206_list = []
     reset_flags_list = []
     obs_dict = env.reset_all()
 
@@ -236,6 +284,49 @@ def collect_data(env, algo, config, motion_pool_size, device):
 
             curr_obs = {k: v.cpu().numpy() for k, v in obs_dict.items()}
             obs_list.append(curr_obs)
+
+            # Construct 206-dim state: critic_obs (128) + extended rigid body (78)
+            # For fields shared between critic_obs and actor_obs, use the
+            # actor_obs values so that observation noise is consistent with
+            # what the actor policy received.
+            #
+            # Fields are in ALPHABETICAL order (sorted() in
+            # legged_robot_base_ma.py _post_config_observation_callback).
+            #
+            # Critic obs (128, alphabetical):
+            #   actions[0:29], base_ang_vel[29:32], base_lin_vel[32:35],
+            #   base_orientation[35:39], cmd_ang_vel[39:40], cmd_base_height[40:41],
+            #   cmd_lin_vel[41:43], cmd_stand[43:44], cmd_waist_dofs[44:47],
+            #   dof_pos[47:76], dof_vel[76:105], left_ee_force[105:108],
+            #   proj_gravity[108:111], ref_upper_dof_pos[111:125],
+            #   right_ee_force[125:128]
+            #
+            # Actor obs last frame (115, alphabetical, at offset 460):
+            #   actions[460:489], base_ang_vel[489:492], cmd_ang_vel[492:493],
+            #   cmd_base_height[493:494], cmd_lin_vel[494:496], cmd_stand[496:497],
+            #   cmd_waist_dofs[497:500], dof_pos[500:529], dof_vel[529:558],
+            #   proj_gravity[558:561], ref_upper_dof_pos[561:575]
+            critic_obs = obs_dict["critic_obs"].clone()  # (num_envs, 128)
+            actor_obs = obs_dict["actor_obs"]  # (num_envs, 575)
+
+            # Overwrite shared fields with actor_obs (last frame) values
+            critic_obs[:, 0:29] = actor_obs[:, 460:489]      # actions
+            critic_obs[:, 29:32] = actor_obs[:, 489:492]      # base_ang_vel
+            critic_obs[:, 39:40] = actor_obs[:, 492:493]      # command_ang_vel
+            critic_obs[:, 40:41] = actor_obs[:, 493:494]      # command_base_height
+            critic_obs[:, 41:43] = actor_obs[:, 494:496]      # command_lin_vel
+            critic_obs[:, 43:44] = actor_obs[:, 496:497]      # command_stand
+            critic_obs[:, 44:47] = actor_obs[:, 497:500]      # command_waist_dofs
+            critic_obs[:, 47:76] = actor_obs[:, 500:529]      # dof_pos
+            critic_obs[:, 76:105] = actor_obs[:, 529:558]     # dof_vel
+            critic_obs[:, 108:111] = actor_obs[:, 558:561]    # projected_gravity
+            critic_obs[:, 111:125] = actor_obs[:, 561:575]    # ref_upper_dof_pos
+            # Critic-only fields kept: base_lin_vel[32:35], base_orientation[35:39],
+            #   left_ee_force[105:108], right_ee_force[125:128]
+
+            extended_state = extract_extended_state(env, body_idx)  # (num_envs, 78)
+            state_206 = torch.cat([critic_obs, extended_state], dim=1)
+            state_206_list.append(state_206.cpu().numpy())
 
             if hasattr(algo, "act_inference"):
                 actions = algo.act_inference(obs_dict["actor_obs"])
@@ -252,17 +343,18 @@ def collect_data(env, algo, config, motion_pool_size, device):
             # Collect reset flags after step (indicates if env was reset due to failure)
             reset_flags_list.append(env.reset_flag.cpu().numpy().copy())
 
-    return obs_list, actions_list, reset_flags_list
+    return obs_list, actions_list, state_206_list, reset_flags_list
 
 
-def save_results(obs_list, actions_list, reset_flags_list, output_dir):
+def save_results(obs_list, actions_list, state_206_list, reset_flags_list, output_dir):
     """
-    Saves the collected observations, actions, and reset flags to disk.
+    Saves the collected observations, actions, 206-dim state, and reset flags to disk.
     Reorganizes observations from list of dicts to dict of arrays.
     Reset flags indicate which environments were reset due to failures (discontinuous data).
     """
     obs_path = output_dir / "observations.npz"
     actions_path = output_dir / "actions.npy"
+    state_206_path = output_dir / "state_206.npy"
     reset_flags_path = output_dir / "reset_flags.npy"
 
     save_obs = {}
@@ -278,6 +370,12 @@ def save_results(obs_list, actions_list, reset_flags_list, output_dir):
     save_actions = np.array(actions_list)
     logger.info(f"Saving actions to {actions_path} with shape {save_actions.shape}")
     np.save(actions_path, save_actions)
+
+    save_state_206 = np.array(state_206_list)
+    logger.info(
+        f"Saving 206-dim state to {state_206_path} with shape {save_state_206.shape}"
+    )
+    np.save(state_206_path, save_state_206)
 
     save_reset_flags = np.array(reset_flags_list)
     logger.info(
@@ -303,13 +401,13 @@ def main(override_config: OmegaConf):
 
     config, checkpoint = load_config(override_config)
 
-    env, algo, motion_pool_size = setup_simulation(config, checkpoint, device)
+    env, algo, motion_pool_size, body_idx = setup_simulation(config, checkpoint, device)
 
-    obs_list, actions_list, reset_flags_list = collect_data(
-        env, algo, config, motion_pool_size, device
+    obs_list, actions_list, state_206_list, reset_flags_list = collect_data(
+        env, algo, config, motion_pool_size, body_idx, device
     )
 
-    save_results(obs_list, actions_list, reset_flags_list, output_dir)
+    save_results(obs_list, actions_list, state_206_list, reset_flags_list, output_dir)
 
     logger.info("Done.")
 
