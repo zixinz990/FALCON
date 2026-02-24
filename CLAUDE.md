@@ -120,7 +120,7 @@ Separate actor (lower body control, partial obs) and critic (full body, privileg
 
 ### Distillation Pipeline
 
-1. **Data collection** (`collect_data.py`) — run trained NN policy, record state_206 + actions
+1. **Data collection** (`collect_data.py`) — run trained NN policy, record state_206 + actions + rewards
 2. **Autoencoder + linear policy** (`humanoid_linear_distill/train.py`) — train phi/psi encoders + KNet
 3. **Linear DPG** (`linear-dpg/run_solver.py`) — optimize K matrix using differentiable reward (JAX)
 4. **Evaluation** (`eval_distilled_agent.py`) — compare original vs distilled in IsaacGym
