@@ -350,10 +350,25 @@ def collect_data(env, algo, config, motion_pool_size, body_idx, device):
             # Collect reset flags after step (indicates if env was reset due to failure)
             reset_flags_list.append(env.reset_flag.cpu().numpy().copy())
 
-    return obs_list, actions_list, state_206_list, reset_flags_list, rewards_list, reward_keys
+    return (
+        obs_list,
+        actions_list,
+        state_206_list,
+        reset_flags_list,
+        rewards_list,
+        reward_keys,
+    )
 
 
-def save_results(obs_list, actions_list, state_206_list, reset_flags_list, rewards_list, reward_keys, output_dir):
+def save_results(
+    obs_list,
+    actions_list,
+    state_206_list,
+    reset_flags_list,
+    rewards_list,
+    reward_keys,
+    output_dir,
+):
     """
     Saves the collected observations, actions, 206-dim state, reset flags, and rewards to disk.
     Reorganizes observations from list of dicts to dict of arrays.
@@ -395,9 +410,7 @@ def save_results(obs_list, actions_list, state_206_list, reset_flags_list, rewar
     np.save(reset_flags_path, save_reset_flags)
 
     save_rewards = np.array(rewards_list)
-    logger.info(
-        f"Saving rewards to {rewards_path} with shape {save_rewards.shape}"
-    )
+    logger.info(f"Saving rewards to {rewards_path} with shape {save_rewards.shape}")
     np.save(rewards_path, save_rewards)
 
     with open(reward_keys_path, "w") as f:
@@ -422,11 +435,24 @@ def main(override_config: OmegaConf):
 
     env, algo, motion_pool_size, body_idx = setup_simulation(config, checkpoint, device)
 
-    obs_list, actions_list, state_206_list, reset_flags_list, rewards_list, reward_keys = collect_data(
-        env, algo, config, motion_pool_size, body_idx, device
-    )
+    (
+        obs_list,
+        actions_list,
+        state_206_list,
+        reset_flags_list,
+        rewards_list,
+        reward_keys,
+    ) = collect_data(env, algo, config, motion_pool_size, body_idx, device)
 
-    save_results(obs_list, actions_list, state_206_list, reset_flags_list, rewards_list, reward_keys, output_dir)
+    save_results(
+        obs_list,
+        actions_list,
+        state_206_list,
+        reset_flags_list,
+        rewards_list,
+        reward_keys,
+        output_dir,
+    )
 
     logger.info("Done.")
 
