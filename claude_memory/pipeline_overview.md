@@ -29,8 +29,8 @@ Config: Hydra-based, loads training checkpoint config and merges with overrides.
 - Splits into train/val datasets
 
 **Network architecture** (`utils/networks.py`):
-- `ObsNet` (phi): 206 → 2048 → 2048 → 1024 (encoder)
-- `ObsNet` (psi): 1024 → 2048 → 2048 → 206 (decoder)
+- `TwoLayerNet` (phi): 206 → 2048 → 2048 → 1024 (encoder)
+- `TwoLayerNet` (psi): 1024 → 2048 → 2048 → 206 (decoder)
 - `KNet`: 1024 → 29 (linear policy, single linear layer)
 - `ANet`: 1024 → 1024 (state transition in feature space)
 - `BNet`: 29 → 1024 (control input matrix in feature space)
