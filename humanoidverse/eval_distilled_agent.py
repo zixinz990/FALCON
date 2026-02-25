@@ -28,7 +28,11 @@ from utils.config_utils import *
 from humanoidverse.utils.logging import HydraLoggerBridge
 from humanoidverse.utils.helpers import pre_process_config
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
-from humanoid_linear_distill.utils.networks import TwoLayerNet, KNet
+from humanoid_linear_distill.utils.networks import (
+    TwoLayerNet,
+    SingleLayerNet,
+    IdentityEncoder,
+)
 
 # Visual marker settings for policy distinction
 ORIGINAL_POLICY_COLOR = (0.0, 0.5, 1.0)  # Blue
@@ -322,9 +326,19 @@ def load_distilled_policy(config, device):
         logger.error(f"K_nn.pth not found at: {K_path}")
         sys.exit(1)
 
-    # Auto-detect input_size from saved weights
+    # Auto-detect architecture from saved weights
     phi_state = torch.load(phi_path, map_location=device)
-    input_size = phi_state["linear1.weight"].shape[1]
+    is_identity = any(k.startswith("extra_net.") for k in phi_state)
+
+    if is_identity:
+        input_size = phi_state["extra_net.linear1.weight"].shape[1]
+        encoder_hidden_dim_1 = phi_state["extra_net.linear1.weight"].shape[0]
+        encoder_hidden_dim_2 = phi_state["extra_net.linear2.weight"].shape[0]
+        learned_feature_dim = phi_state["extra_net.linear3.weight"].shape[0]
+        latent_dim = input_size + learned_feature_dim
+    else:
+        input_size = phi_state["linear1.weight"].shape[1]
+        latent_dim = feature_dim
 
     # Determine state_type: auto-detect from input_size or use explicit override
     distilled_state_type = config.get("distilled_state_type", "auto")
@@ -352,13 +366,20 @@ def load_distilled_policy(config, device):
         f"  State type: {state_type} (input_size={input_size}), action_dim={action_dim}"
     )
     logger.info(
-        f"  Network dimensions: feature_dim={feature_dim}, hidden_size={hidden_size}"
+        f"  Network dimensions: latent_dim={latent_dim}, hidden_size={hidden_size}"
     )
 
-    phi_nn = TwoLayerNet(
-        input_size=input_size, hidden_size=hidden_size, output_size=feature_dim
-    ).to(device)
-    K_nn = KNet(input_size=feature_dim, output_size=action_dim, bias=False).to(device)
+    if is_identity:
+        phi_nn = IdentityEncoder(
+            input_size, encoder_hidden_dim_1, encoder_hidden_dim_2, learned_feature_dim
+        ).to(device)
+    else:
+        # TODO: legacy TwoLayerNet now includes BatchNorm — old checkpoints
+        #       without bn keys will fail to load here.
+        phi_nn = TwoLayerNet(input_size, hidden_size, hidden_size, feature_dim).to(
+            device
+        )
+    K_nn = SingleLayerNet(latent_dim, action_dim, bias=False).to(device)
 
     phi_nn.load_state_dict(phi_state)
     K_nn.load_state_dict(torch.load(K_path, map_location=device))
@@ -366,26 +387,21 @@ def load_distilled_policy(config, device):
     K_nn.eval()
 
     # Extract K matrix from the single linear layer of K_nn
-    K_matrix = K_nn.linear1.weight.data.clone()  # (action_dim, feature_dim)
+    K_matrix = K_nn.linear1.weight.data.clone()  # (action_dim, latent_dim)
     logger.info(f"Extracted K matrix {tuple(K_matrix.shape)} from K_nn")
 
     # Load reward_nn if available (optional)
     reward_path = distilled_model_dir / "reward_nn.pth"
     reward_nn = None
     if reward_path.exists():
-        reward_state = torch.load(reward_path, map_location=device)
-        reward_hidden_size = reward_state["linear1.weight"].shape[0]
-        reward_input_size = reward_state["linear1.weight"].shape[1]
-        reward_nn = TwoLayerNet(
-            input_size=reward_input_size,
-            hidden_size=reward_hidden_size,
-            output_size=1,
-        ).to(device)
-        reward_nn.load_state_dict(reward_state)
-        reward_nn.eval()
-        logger.info(
-            f"  Loaded reward_nn (input={reward_input_size}, hidden={reward_hidden_size}, output=1)"
+        from humanoid_linear_distill.export_models import load_and_build
+
+        reward_nn_model, _ = load_and_build(
+            str(distilled_model_dir), "reward_nn", device
         )
+        reward_nn = reward_nn_model
+        reward_nn.eval()
+        logger.info(f"  Loaded reward_nn from {reward_path}")
     else:
         logger.info("  reward_nn.pth not found, skipping reward estimation")
 
