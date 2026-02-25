@@ -1,8 +1,8 @@
 """
 Triplet policy comparison: runs three policies side-by-side.
 Env index % 3 == 0: original policy
-Env index % 3 == 1: distilled NN policy (u = K_nn(phi(x)))
-Env index % 3 == 2: matrix policy (u = K @ phi(x) + b, extracted from K_nn)
+Env index % 3 == 1: Distilled (NN) policy (u = K_nn(phi(x)))
+Env index % 3 == 2: Distilled (matrix) policy (u = K @ phi(x), extracted from K_nn)
 """
 
 import os
@@ -28,7 +28,7 @@ from utils.config_utils import *
 from humanoidverse.utils.logging import HydraLoggerBridge
 from humanoidverse.utils.helpers import pre_process_config
 from humanoidverse.agents.base_algo.base_algo import BaseAlgo
-from humanoid_linear_distill.utils.networks import ObsNet, KNet
+from humanoid_linear_distill.utils.networks import TwoLayerNet, KNet
 
 # Visual marker settings for policy distinction
 ORIGINAL_POLICY_COLOR = (0.0, 0.5, 1.0)  # Blue
@@ -154,8 +154,8 @@ def monkey_patch_triplet_reset(env, device):
     num_envs = env.num_envs
     env.reset_flag = torch.zeros(num_envs, dtype=torch.bool, device=device)
     env.policy_type = torch.zeros(num_envs, dtype=torch.long, device=device)
-    env.policy_type[1::3] = 1  # Distilled NN policy
-    env.policy_type[2::3] = 2  # Matrix K policy
+    env.policy_type[1::3] = 1  # Distilled (NN) policy
+    env.policy_type[2::3] = 2  # Distilled (matrix) policy
 
     def custom_reset_envs_idx(self, env_ids, target_states=None, target_buf=None):
         if len(env_ids) == 0:
@@ -242,7 +242,7 @@ def arrange_triplet_environments(env, config, device):
         f"  Environment spacing: {env_spacing}m, Triplet offset: {triplet_offset}m"
     )
     logger.info(
-        "  LEFT = Original policy, CENTER = Distilled NN policy, RIGHT = Matrix K policy"
+        "  LEFT = Original policy, CENTER = Distilled (NN) policy, RIGHT = Distilled (matrix) policy"
     )
 
     new_origins = torch.zeros(num_envs, 3, device=device)
@@ -258,13 +258,13 @@ def arrange_triplet_environments(env, config, device):
         new_origins[orig_idx, 1] = base_y - triplet_offset
         new_origins[orig_idx, 2] = 0.0
 
-        # Distilled NN policy (i%3==1) in center
+        # Distilled (NN) policy (i%3==1) in center
         dist_nn_idx = triplet_idx * 3 + 1
         new_origins[dist_nn_idx, 0] = base_x
         new_origins[dist_nn_idx, 1] = base_y
         new_origins[dist_nn_idx, 2] = 0.0
 
-        # Matrix K policy (i%3==2) on right
+        # Distilled (matrix) policy (i%3==2) on right
         mat_idx = triplet_idx * 3 + 2
         new_origins[mat_idx, 0] = base_x
         new_origins[mat_idx, 1] = base_y + triplet_offset
@@ -302,25 +302,16 @@ def initialize_motion_pool(env, config, device):
 
 
 def load_distilled_policy(config, device):
-    """Load distilled policy networks (phi_nn and K_nn)."""
+    """Load distilled policy networks (phi_nn and K_nn).
+
+    Auto-detects input dimension from saved phi_nn weights.
+    Returns state_type ("actor_obs" or "state_206") indicating which obs to feed.
+    Override with config.distilled_state_type = "actor_obs" | "state_206" | "auto".
+    """
     distilled_model_dir = Path(config.distilled_model_dir)
     feature_dim = config.get("feature_dim", 1024)
     hidden_size = config.get("hidden_size", 2048)
-    actor_obs_dim = config.get("actor_obs_dim", 206)
     action_dim = config.get("action_dim", 29)
-
-    logger.info(f"Loading distilled policy from: {distilled_model_dir}")
-    logger.info(
-        f"  Model dimensions: actor_obs_dim={actor_obs_dim}, action_dim={action_dim}"
-    )
-    logger.info(
-        f"  Network dimensions: feature_dim={feature_dim}, hidden_size={hidden_size}"
-    )
-
-    phi_nn = ObsNet(
-        input_size=actor_obs_dim, hidden_size=hidden_size, output_size=feature_dim
-    ).to(device)
-    K_nn = KNet(input_size=feature_dim, output_size=action_dim, bias=False).to(device)
 
     phi_path = distilled_model_dir / "phi_nn.pth"
     K_path = distilled_model_dir / "K_nn.pth"
@@ -331,23 +322,75 @@ def load_distilled_policy(config, device):
         logger.error(f"K_nn.pth not found at: {K_path}")
         sys.exit(1)
 
-    phi_nn.load_state_dict(torch.load(phi_path, map_location=device))
+    # Auto-detect input_size from saved weights
+    phi_state = torch.load(phi_path, map_location=device)
+    input_size = phi_state["linear1.weight"].shape[1]
+
+    # Determine state_type: auto-detect from input_size or use explicit override
+    distilled_state_type = config.get("distilled_state_type", "auto")
+    if distilled_state_type == "auto":
+        if input_size == 575:
+            state_type = "actor_obs"
+        elif input_size == 206:
+            state_type = "state_206"
+        else:
+            state_type = "state_206"
+            logger.warning(
+                f"Unknown input_size {input_size} from phi_nn weights, defaulting to state_206"
+            )
+    else:
+        state_type = distilled_state_type
+        expected_size = 575 if state_type == "actor_obs" else 206
+        if input_size != expected_size:
+            logger.warning(
+                f"distilled_state_type={state_type} expects input_size={expected_size}, "
+                f"but phi_nn weights have input_size={input_size}. Proceeding with override."
+            )
+
+    logger.info(f"Loading distilled policy from: {distilled_model_dir}")
+    logger.info(
+        f"  State type: {state_type} (input_size={input_size}), action_dim={action_dim}"
+    )
+    logger.info(
+        f"  Network dimensions: feature_dim={feature_dim}, hidden_size={hidden_size}"
+    )
+
+    phi_nn = TwoLayerNet(
+        input_size=input_size, hidden_size=hidden_size, output_size=feature_dim
+    ).to(device)
+    K_nn = KNet(input_size=feature_dim, output_size=action_dim, bias=False).to(device)
+
+    phi_nn.load_state_dict(phi_state)
     K_nn.load_state_dict(torch.load(K_path, map_location=device))
     phi_nn.eval()
     K_nn.eval()
 
-    # Extract K matrix and bias from the single linear layer of K_nn
-    # K_nn(z) = K_matrix @ z + b_vector
+    # Extract K matrix from the single linear layer of K_nn
     K_matrix = K_nn.linear1.weight.data.clone()  # (action_dim, feature_dim)
-    # b_vector = K_nn.linear1.bias.data.clone()  # (action_dim,)
-    # logger.info(
-    #     f"Extracted K matrix {tuple(K_matrix.shape)} and b vector {tuple(b_vector.shape)} from K_nn"
-    # )
     logger.info(f"Extracted K matrix {tuple(K_matrix.shape)} from K_nn")
 
+    # Load reward_nn if available (optional)
+    reward_path = distilled_model_dir / "reward_nn.pth"
+    reward_nn = None
+    if reward_path.exists():
+        reward_state = torch.load(reward_path, map_location=device)
+        reward_hidden_size = reward_state["linear1.weight"].shape[0]
+        reward_input_size = reward_state["linear1.weight"].shape[1]
+        reward_nn = TwoLayerNet(
+            input_size=reward_input_size,
+            hidden_size=reward_hidden_size,
+            output_size=1,
+        ).to(device)
+        reward_nn.load_state_dict(reward_state)
+        reward_nn.eval()
+        logger.info(
+            f"  Loaded reward_nn (input={reward_input_size}, hidden={reward_hidden_size}, output=1)"
+        )
+    else:
+        logger.info("  reward_nn.pth not found, skipping reward estimation")
+
     logger.info("Distilled policy loaded successfully.")
-    # return phi_nn, K_nn, K_matrix, b_vector
-    return phi_nn, K_nn, K_matrix
+    return phi_nn, K_nn, K_matrix, state_type, reward_nn
 
 
 def load_original_policy(config, env, device):
@@ -419,9 +462,21 @@ def setup_simulation(config, checkpoint, device):
 
     logger.info("Loading policies...")
     algo = load_original_policy(config, env, device)
-    phi_nn, K_nn, K_matrix = load_distilled_policy(config, device)
+    phi_nn, K_nn, K_matrix, state_type, reward_nn = load_distilled_policy(
+        config, device
+    )
 
-    return env, algo, phi_nn, K_nn, K_matrix, motion_pool_size, body_idx
+    return (
+        env,
+        algo,
+        phi_nn,
+        K_nn,
+        K_matrix,
+        motion_pool_size,
+        body_idx,
+        state_type,
+        reward_nn,
+    )
 
 
 def handle_timeouts(env, infos, motion_pool_size, step, device):
@@ -454,7 +509,7 @@ def handle_timeouts(env, infos, motion_pool_size, step, device):
 
 
 def draw_policy_markers(env):
-    """Draw colored spheres above robots: blue=original, orange=distilled NN, green=matrix K."""
+    """Draw colored spheres above robots: blue=Original, orange=Distilled (NN), green=Distilled (matrix)."""
     if not hasattr(env, "simulator") or not hasattr(env.simulator, "gym"):
         return
     if env.simulator.headless:
@@ -495,7 +550,17 @@ def draw_policy_markers(env):
 #     env, algo, phi_nn, K_nn, K_matrix, b_vector, config, motion_pool_size, device
 # ):
 def collect_data(
-    env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, body_idx, device
+    env,
+    algo,
+    phi_nn,
+    K_nn,
+    K_matrix,
+    config,
+    motion_pool_size,
+    body_idx,
+    state_type,
+    reward_nn,
+    device,
 ):
     """Run simulation with three policies per triplet. Track rewards for all three."""
     num_steps = config.get("num_steps", 500)
@@ -506,8 +571,8 @@ def collect_data(
         f"Collecting data for {num_steps} steps with {num_triplets} triplet environments..."
     )
     logger.info("  BLUE marker: Original policy (i%3==0)")
-    logger.info("  ORANGE marker: Distilled NN policy (i%3==1)")
-    logger.info("  GREEN marker: Matrix K policy (i%3==2)")
+    logger.info("  ORANGE marker: Distilled (NN) policy (i%3==1)")
+    logger.info("  GREEN marker: Distilled (matrix) policy (i%3==2)")
 
     obs_list = []
     commands_list = []
@@ -535,6 +600,18 @@ def collect_data(
     current_episode_steps = torch.zeros(num_triplets, dtype=torch.long, device=device)
     current_motion_ids = torch.zeros(num_triplets, dtype=torch.long, device=device)
 
+    # Reward model prediction accumulators (only if reward_nn is available)
+    if reward_nn is not None:
+        current_episode_reward_pred_original = torch.zeros(num_triplets, device=device)
+        current_episode_reward_pred_distilled = torch.zeros(num_triplets, device=device)
+        current_episode_reward_pred_matrix = torch.zeros(num_triplets, device=device)
+        # Per-step error tracking for MAE/RMSE
+        reward_abs_error_sum = torch.zeros(
+            3, device=device
+        )  # [original, distilled, matrix]
+        reward_sq_error_sum = torch.zeros(3, device=device)
+        reward_error_count = torch.zeros(3, dtype=torch.long, device=device)
+
     obs_dict = env.reset_all()
     sync_triplet_commands(env, device)
     sync_triplet_motion_ids(env, device)
@@ -556,11 +633,6 @@ def collect_data(
             actor_obs = obs_dict["actor_obs"]
             actions = torch.zeros(num_envs, env.config.robot.actions_dim, device=device)
 
-            # Construct 206-dim state for distilled policies: critic_obs (128) + extended (78)
-            critic_obs = obs_dict["critic_obs"]
-            extended_state = extract_extended_state(env, body_idx)
-            state_206 = torch.cat([critic_obs, extended_state], dim=1)
-
             # Original policy for i%3==0 (uses 575-dim actor_obs)
             orig_indices = torch.arange(0, num_envs, 3, device=device)
             if hasattr(algo, "act_inference"):
@@ -570,14 +642,24 @@ def collect_data(
                     actor_obs[orig_indices]
                 )
 
-            # Distilled NN policy for i%3==1: u = K_nn(phi_nn(state_206))
+            # Build input for distilled policies based on state_type
+            if state_type == "actor_obs":
+                distilled_input = actor_obs  # 575-dim
+            else:
+                critic_obs = obs_dict["critic_obs"]
+                extended_state = extract_extended_state(env, body_idx)
+                distilled_input = torch.cat(
+                    [critic_obs, extended_state], dim=1
+                )  # 206-dim
+
+            # Distilled (NN) policy for i%3==1: u = K_nn(phi_nn(x))
             dist_nn_indices = torch.arange(1, num_envs, 3, device=device)
-            phi_x_nn = phi_nn(state_206[dist_nn_indices])
+            phi_x_nn = phi_nn(distilled_input[dist_nn_indices])
             actions[dist_nn_indices] = K_nn(phi_x_nn)
 
-            # Matrix K policy for i%3==2: u = K @ phi_nn(state_206)
+            # Distilled (matrix) policy for i%3==2: u = K @ phi_nn(x)
             mat_indices = torch.arange(2, num_envs, 3, device=device)
-            phi_x_mat = phi_nn(state_206[mat_indices])
+            phi_x_mat = phi_nn(distilled_input[mat_indices])
             actions[mat_indices] = phi_x_mat @ K_matrix.T
 
             actions_original_list.append(actions[orig_indices].cpu().numpy())
@@ -633,6 +715,33 @@ def collect_data(
             current_episode_rewards_matrix += rewards_matrix
             current_episode_steps += 1
 
+            # Reward model estimation
+            if reward_nn is not None:
+                z_all = phi_nn(distilled_input)
+                predicted_rewards = reward_nn(z_all).squeeze(-1)  # (num_envs,)
+                pred_original = predicted_rewards[0::3]
+                pred_distilled = predicted_rewards[1::3]
+                pred_matrix = predicted_rewards[2::3]
+                current_episode_reward_pred_original += pred_original
+                current_episode_reward_pred_distilled += pred_distilled
+                current_episode_reward_pred_matrix += pred_matrix
+                # Per-step error tracking
+                reward_abs_error_sum[0] += (
+                    (pred_original - rewards_original).abs().sum()
+                )
+                reward_abs_error_sum[1] += (
+                    (pred_distilled - rewards_distilled).abs().sum()
+                )
+                reward_abs_error_sum[2] += (pred_matrix - rewards_matrix).abs().sum()
+                reward_sq_error_sum[0] += (
+                    (pred_original - rewards_original) ** 2
+                ).sum()
+                reward_sq_error_sum[1] += (
+                    (pred_distilled - rewards_distilled) ** 2
+                ).sum()
+                reward_sq_error_sum[2] += ((pred_matrix - rewards_matrix) ** 2).sum()
+                reward_error_count += num_triplets
+
             # Check for episode completion
             reset_flags_0 = env.reset_flag[0::3]
             reset_flags_1 = env.reset_flag[1::3]
@@ -649,17 +758,27 @@ def collect_data(
             completed_triplet_ids = torch.where(completed_triplets)[0]
             for triplet_id in completed_triplet_ids:
                 tid = triplet_id.item()
-                completed_episodes.append(
-                    {
-                        "motion_id": current_motion_ids[tid].item(),
-                        "original_reward": current_episode_rewards_original[tid].item(),
-                        "distilled_reward": current_episode_rewards_distilled[
-                            tid
-                        ].item(),
-                        "matrix_reward": current_episode_rewards_matrix[tid].item(),
-                        "steps": current_episode_steps[tid].item(),
-                    }
-                )
+                ep_data = {
+                    "motion_id": current_motion_ids[tid].item(),
+                    "original_reward": current_episode_rewards_original[tid].item(),
+                    "distilled_reward": current_episode_rewards_distilled[tid].item(),
+                    "matrix_reward": current_episode_rewards_matrix[tid].item(),
+                    "steps": current_episode_steps[tid].item(),
+                }
+                if reward_nn is not None:
+                    ep_data["reward_pred_original"] = (
+                        current_episode_reward_pred_original[tid].item()
+                    )
+                    ep_data["reward_pred_distilled"] = (
+                        current_episode_reward_pred_distilled[tid].item()
+                    )
+                    ep_data["reward_pred_matrix"] = current_episode_reward_pred_matrix[
+                        tid
+                    ].item()
+                    current_episode_reward_pred_original[tid] = 0
+                    current_episode_reward_pred_distilled[tid] = 0
+                    current_episode_reward_pred_matrix[tid] = 0
+                completed_episodes.append(ep_data)
                 current_episode_rewards_original[tid] = 0
                 current_episode_rewards_distilled[tid] = 0
                 current_episode_rewards_matrix[tid] = 0
@@ -673,15 +792,34 @@ def collect_data(
     # Record incomplete episodes
     for tid in range(num_triplets):
         if current_episode_steps[tid] > 0:
-            completed_episodes.append(
-                {
-                    "motion_id": current_motion_ids[tid].item(),
-                    "original_reward": current_episode_rewards_original[tid].item(),
-                    "distilled_reward": current_episode_rewards_distilled[tid].item(),
-                    "matrix_reward": current_episode_rewards_matrix[tid].item(),
-                    "steps": current_episode_steps[tid].item(),
-                }
-            )
+            ep_data = {
+                "motion_id": current_motion_ids[tid].item(),
+                "original_reward": current_episode_rewards_original[tid].item(),
+                "distilled_reward": current_episode_rewards_distilled[tid].item(),
+                "matrix_reward": current_episode_rewards_matrix[tid].item(),
+                "steps": current_episode_steps[tid].item(),
+            }
+            if reward_nn is not None:
+                ep_data["reward_pred_original"] = current_episode_reward_pred_original[
+                    tid
+                ].item()
+                ep_data["reward_pred_distilled"] = (
+                    current_episode_reward_pred_distilled[tid].item()
+                )
+                ep_data["reward_pred_matrix"] = current_episode_reward_pred_matrix[
+                    tid
+                ].item()
+            completed_episodes.append(ep_data)
+
+    # Compute per-step reward estimation error stats
+    reward_estimation_stats = None
+    if reward_nn is not None:
+        reward_estimation_stats = {
+            "mae": (reward_abs_error_sum / reward_error_count.float()).cpu().tolist(),
+            "rmse": ((reward_sq_error_sum / reward_error_count.float()).sqrt())
+            .cpu()
+            .tolist(),
+        }
 
     return (
         obs_list,
@@ -697,10 +835,11 @@ def collect_data(
         actions_matrix_list,
         reset_flags_list,
         completed_episodes,
+        reward_estimation_stats,
     )
 
 
-def print_reward_summary(completed_episodes, output_dir):
+def print_reward_summary(completed_episodes, output_dir, reward_estimation_stats=None):
     """Print and save reward comparison between all three policies."""
     if not completed_episodes:
         logger.warning("No completed episodes to summarize.")
@@ -708,11 +847,11 @@ def print_reward_summary(completed_episodes, output_dir):
 
     logger.info("")
     logger.info("=" * 110)
-    logger.info("  REWARD SUMMARY: Original vs Distilled NN vs Matrix K")
+    logger.info("  REWARD SUMMARY: Original vs Distilled (NN) vs Distilled (matrix)")
     logger.info("=" * 110)
     logger.info("")
     logger.info(
-        f"{'Motion ID':>10} | {'Steps':>6} | {'Original':>12} | {'Distilled':>12} | {'Matrix K':>12} | {'O-D Diff':>10} | {'O-M Diff':>10} | {'D-M Diff':>10}"
+        f"{'Motion ID':>10} | {'Steps':>6} | {'Original':>12} | {'Dist (NN)':>12} | {'Dist (mat)':>12} | {'O-D(NN)':>10} | {'O-D(mat)':>10} | {'D-D Diff':>10}"
     )
     logger.info("-" * 110)
 
@@ -748,10 +887,10 @@ def print_reward_summary(completed_episodes, output_dir):
             winner = "Original"
             original_wins += 1
         elif dist_reward == best:
-            winner = "Distilled"
+            winner = "Distilled (NN)"
             distilled_wins += 1
         else:
-            winner = "Matrix K"
+            winner = "Distilled (matrix)"
             matrix_wins += 1
 
         logger.info(
@@ -768,25 +907,25 @@ def print_reward_summary(completed_episodes, output_dir):
     )
     logger.info("")
     logger.info(f"Number of episodes: {len(completed_episodes)}")
-    logger.info(f"Original policy wins:    {original_wins}")
-    logger.info(f"Distilled NN policy wins: {distilled_wins}")
-    logger.info(f"Matrix K policy wins:    {matrix_wins}")
+    logger.info(f"Original policy wins:         {original_wins}")
+    logger.info(f"Distilled (NN) policy wins:   {distilled_wins}")
+    logger.info(f"Distilled (matrix) policy wins: {matrix_wins}")
     logger.info(f"Ties: {ties}")
     logger.info("")
 
     # Distilled NN vs Matrix K agreement check
-    logger.info("--- Distilled NN vs Matrix K Agreement ---")
+    logger.info("--- Distilled (NN) vs Distilled (matrix) Agreement ---")
     max_diff_dm = 0.0
     for ep in completed_episodes:
         d = abs(ep["distilled_reward"] - ep["matrix_reward"])
         if d > max_diff_dm:
             max_diff_dm = d
     logger.info(
-        f"Max absolute reward difference (Distilled - Matrix): {max_diff_dm:.6f}"
+        f"Max absolute reward difference (Distilled (NN) - Distilled (matrix)): {max_diff_dm:.6f}"
     )
     if max_diff_dm < 1e-3:
         logger.info(
-            "Distilled NN and Matrix K policies produce nearly identical rewards (as expected)."
+            "Distilled (NN) and Distilled (matrix) policies produce nearly identical rewards (as expected)."
         )
     logger.info("")
 
@@ -795,11 +934,89 @@ def print_reward_summary(completed_episodes, output_dir):
             f"Average reward per step (Original):     {total_original / total_steps:.4f}"
         )
         logger.info(
-            f"Average reward per step (Distilled NN): {total_distilled / total_steps:.4f}"
+            f"Average reward per step (Distilled (NN)):     {total_distilled / total_steps:.4f}"
         )
         logger.info(
-            f"Average reward per step (Matrix K):     {total_matrix / total_steps:.4f}"
+            f"Average reward per step (Distilled (matrix)): {total_matrix / total_steps:.4f}"
         )
+
+    # Reward model estimation summary
+    has_reward_pred = (
+        completed_episodes and "reward_pred_original" in completed_episodes[0]
+    )
+    if has_reward_pred and reward_estimation_stats is not None:
+        logger.info("")
+        logger.info("=" * 110)
+        logger.info("  REWARD MODEL ESTIMATION")
+        logger.info("=" * 110)
+        logger.info("")
+
+        # Per-step error stats
+        mae = reward_estimation_stats["mae"]
+        rmse = reward_estimation_stats["rmse"]
+        logger.info("Per-step error (across all episodes):")
+        logger.info(
+            f"  MAE  — Original: {mae[0]:.6f}  Distilled: {mae[1]:.6f}  Matrix K: {mae[2]:.6f}"
+        )
+        logger.info(
+            f"  RMSE — Original: {rmse[0]:.6f}  Distilled: {rmse[1]:.6f}  Matrix K: {rmse[2]:.6f}"
+        )
+        logger.info("")
+
+        # Per-episode actual vs predicted
+        logger.info(
+            f"{'Motion ID':>10} | {'Steps':>6} | "
+            f"{'Orig Actual':>12} {'Orig Pred':>12} {'Orig Err%':>10} | "
+            f"{'D(NN) Actual':>12} {'D(NN) Pred':>12} {'D(NN) Err%':>10} | "
+            f"{'D(mat) Actual':>13} {'D(mat) Pred':>12} {'D(mat) Err%':>11}"
+        )
+        logger.info("-" * 145)
+
+        total_pred_original = 0.0
+        total_pred_distilled = 0.0
+        total_pred_matrix = 0.0
+        for ep in completed_episodes:
+            mid = ep["motion_id"]
+            steps = ep["steps"]
+            o_act, o_pred = ep["original_reward"], ep["reward_pred_original"]
+            d_act, d_pred = ep["distilled_reward"], ep["reward_pred_distilled"]
+            m_act, m_pred = ep["matrix_reward"], ep["reward_pred_matrix"]
+            o_pct = ((o_pred - o_act) / abs(o_act) * 100) if abs(o_act) > 1e-6 else 0.0
+            d_pct = ((d_pred - d_act) / abs(d_act) * 100) if abs(d_act) > 1e-6 else 0.0
+            m_pct = ((m_pred - m_act) / abs(m_act) * 100) if abs(m_act) > 1e-6 else 0.0
+            total_pred_original += o_pred
+            total_pred_distilled += d_pred
+            total_pred_matrix += m_pred
+            logger.info(
+                f"{mid:>10} | {steps:>6} | "
+                f"{o_act:>12.2f} {o_pred:>12.2f} {o_pct:>+9.1f}% | "
+                f"{d_act:>12.2f} {d_pred:>12.2f} {d_pct:>+9.1f}% | "
+                f"{m_act:>12.2f} {m_pred:>12.2f} {m_pct:>+9.1f}%"
+            )
+
+        logger.info("-" * 145)
+        o_pct_tot = (
+            ((total_pred_original - total_original) / abs(total_original) * 100)
+            if abs(total_original) > 1e-6
+            else 0.0
+        )
+        d_pct_tot = (
+            ((total_pred_distilled - total_distilled) / abs(total_distilled) * 100)
+            if abs(total_distilled) > 1e-6
+            else 0.0
+        )
+        m_pct_tot = (
+            ((total_pred_matrix - total_matrix) / abs(total_matrix) * 100)
+            if abs(total_matrix) > 1e-6
+            else 0.0
+        )
+        logger.info(
+            f"{'TOTAL':>10} | {total_steps:>6} | "
+            f"{total_original:>12.2f} {total_pred_original:>12.2f} {o_pct_tot:>+9.1f}% | "
+            f"{total_distilled:>12.2f} {total_pred_distilled:>12.2f} {d_pct_tot:>+9.1f}% | "
+            f"{total_matrix:>12.2f} {total_pred_matrix:>12.2f} {m_pct_tot:>+9.1f}%"
+        )
+        logger.info("")
 
     rewards_path = output_dir / "reward_comparison.npz"
     np.savez(
@@ -1000,7 +1217,7 @@ def main(override_config: OmegaConf):
 
     logger.info("=" * 60)
     logger.info("  TRIPLET POLICY COMPARISON EVALUATION")
-    logger.info("  Original vs Distilled NN vs Matrix K Policy")
+    logger.info("  Original vs Distilled (NN) vs Distilled (matrix) Policy")
     logger.info("=" * 60)
     logger.info(f"Output directory: {output_dir}")
 
@@ -1010,9 +1227,17 @@ def main(override_config: OmegaConf):
         OmegaConf.save(config, f)
     logger.info(f"Config saved to: {config_save_path}")
 
-    env, algo, phi_nn, K_nn, K_matrix, motion_pool_size, body_idx = setup_simulation(
-        config, checkpoint, device
-    )
+    (
+        env,
+        algo,
+        phi_nn,
+        K_nn,
+        K_matrix,
+        motion_pool_size,
+        body_idx,
+        state_type,
+        reward_nn,
+    ) = setup_simulation(config, checkpoint, device)
 
     (
         obs_list,
@@ -1028,8 +1253,19 @@ def main(override_config: OmegaConf):
         actions_matrix_list,
         reset_flags_list,
         completed_episodes,
+        reward_estimation_stats,
     ) = collect_data(
-        env, algo, phi_nn, K_nn, K_matrix, config, motion_pool_size, body_idx, device
+        env,
+        algo,
+        phi_nn,
+        K_nn,
+        K_matrix,
+        config,
+        motion_pool_size,
+        body_idx,
+        state_type,
+        reward_nn,
+        device,
     )
 
     save_results(
@@ -1059,7 +1295,7 @@ def main(override_config: OmegaConf):
         config,
     )
 
-    print_reward_summary(completed_episodes, output_dir)
+    print_reward_summary(completed_episodes, output_dir, reward_estimation_stats)
 
     logger.info("=" * 60)
     logger.info("  EVALUATION COMPLETE")
