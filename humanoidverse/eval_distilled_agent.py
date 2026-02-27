@@ -332,9 +332,19 @@ def load_distilled_policy(config, device):
 
     if is_identity:
         input_size = phi_state["extra_net.linear1.weight"].shape[1]
-        encoder_hidden_dim_1 = phi_state["extra_net.linear1.weight"].shape[0]
-        encoder_hidden_dim_2 = phi_state["extra_net.linear2.weight"].shape[0]
-        learned_feature_dim = phi_state["extra_net.linear3.weight"].shape[0]
+        # Dynamically detect encoder hidden dims and feature dim from state_dict
+        extra_linear_indices = sorted(
+            int(k.split(".")[1].replace("linear", ""))
+            for k in phi_state
+            if k.startswith("extra_net.linear") and k.endswith(".weight")
+        )
+        encoder_hidden_dims = [
+            int(phi_state[f"extra_net.linear{idx}.weight"].shape[0])
+            for idx in extra_linear_indices[:-1]
+        ]
+        learned_feature_dim = int(
+            phi_state[f"extra_net.linear{extra_linear_indices[-1]}.weight"].shape[0]
+        )
         latent_dim = input_size + learned_feature_dim
     else:
         input_size = phi_state["linear1.weight"].shape[1]
@@ -371,7 +381,7 @@ def load_distilled_policy(config, device):
 
     if is_identity:
         phi_nn = IdentityEncoder(
-            input_size, encoder_hidden_dim_1, encoder_hidden_dim_2, learned_feature_dim
+            input_size, *encoder_hidden_dims, learned_feature_dim
         ).to(device)
     else:
         # TODO: legacy TwoLayerNet now includes BatchNorm — old checkpoints
